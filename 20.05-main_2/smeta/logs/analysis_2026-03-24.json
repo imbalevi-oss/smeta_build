@@ -1,0 +1,131 @@
+[
+  {
+    "type": "analysis_start",
+    "sessionId": "1774334000671",
+    "timestamp": "2026-03-24T06:33:20.671Z",
+    "user": {
+      "fullname": "Батырхан",
+      "institution": "СФК"
+    },
+    "ip": "unknown",
+    "filename": "Ð¥Ð°Ð²ÑÐºÐ°Ñ ÐÐÐ¡ .xlsx",
+    "fileSize": 183631,
+    "fileSizeKB": "179.33",
+    "isRevised": false,
+    "fileType": "НОВЫЙ ФАЙЛ",
+    "message": "НОВЫЙ ФАЙЛ: Начало анализа файла: Ð¥Ð°Ð²ÑÐºÐ°Ñ ÐÐÐ¡ .xlsx"
+  },
+  {
+    "type": "analysis_complete",
+    "sessionId": "1774334000671",
+    "timestamp": "2026-03-24T06:33:21.126Z",
+    "user": {
+      "fullname": "Батырхан",
+      "institution": "СФК"
+    },
+    "filename": "Ð¥Ð°Ð²ÑÐºÐ°Ñ ÐÐÐ¡ .xlsx",
+    "estimateName": "ГВС 17.03.26",
+    "isRevised": false,
+    "fileType": "НОВЫЙ ФАЙЛ",
+    "totalAmount": 869437.72,
+    "totalAmountFormatted": "869 437,72",
+    "totalVatText": "Итого с НДС 22 %",
+    "totalVatPercent": 22,
+    "totalAmountRow": 186,
+    "totalCodes": 40,
+    "foundCodes": 7,
+    "notFoundCodes": 33,
+    "exactMatches": 0,
+    "parentMatches": 0,
+    "sbornikMatches": 7,
+    "textLines": 0,
+    "restorationCodes": 0,
+    "message": "НОВЫЙ ФАЙЛ: Завершение анализа: Ð¥Ð°Ð²ÑÐºÐ°Ñ ÐÐÐ¡ .xlsx, найдено 7 из 40, сумма: 869 437,72"
+  },
+  {
+    "type": "analysis_start",
+    "sessionId": "1774347275487",
+    "timestamp": "2026-03-24T10:14:35.487Z",
+    "user": {
+      "fullname": "Батырхан",
+      "institution": "СФК"
+    },
+    "ip": "unknown",
+    "filename": "Ð¥Ð°Ð²ÑÐºÐ°Ñ Ð¥ÐÐ¡.XLSX",
+    "fileSize": 183622,
+    "fileSizeKB": "179.32",
+    "isRevised": false,
+    "fileType": "НОВЫЙ ФАЙЛ",
+    "message": "НОВЫЙ ФАЙЛ: Начало анализа файла: Ð¥Ð°Ð²ÑÐºÐ°Ñ Ð¥ÐÐ¡.XLSX"
+  },
+  {
+    "type": "analysis_complete",
+    "sessionId": "1774347275487",
+    "timestamp": "2026-03-24T10:14:35.957Z",
+    "user": {
+      "fullname": "Батырхан",
+      "institution": "СФК"
+    },
+    "filename": "Ð¥Ð°Ð²ÑÐºÐ°Ñ Ð¥ÐÐ¡.XLSX",
+    "estimateName": "ХВС 17.03.26",
+    "isRevised": false,
+    "fileType": "НОВЫЙ ФАЙЛ",
+    "totalAmount": 869437.72,
+    "totalAmountFormatted": "869 437,72",
+    "totalVatText": "Итого с НДС 22 %",
+    "totalVatPercent": 22,
+    "totalAmountRow": 186,
+    "totalCodes": 40,
+    "foundCodes": 7,
+    "notFoundCodes": 33,
+    "exactMatches": 0,
+    "parentMatches": 0,
+    "sbornikMatches": 7,
+    "textLines": 0,
+    "restorationCodes": 0,
+    "message": "НОВЫЙ ФАЙЛ: Завершение анализа: Ð¥Ð°Ð²ÑÐºÐ°Ñ Ð¥ÐÐ¡.XLSX, найдено 7 из 40, сумма: 869 437,72"
+  },
+  {
+    "type": "analysis_start",
+    "sessionId": "1774347313855",
+    "timestamp": "2026-03-24T10:15:13.855Z",
+    "user": {
+      "fullname": "Батырхан",
+      "institution": "СФК"
+    },
+    "ip": "unknown",
+    "filename": "Ð­Ð»ÐµÐºÑÑÐ¸ÐºÐ° Ð½Ð¾Ð²Ð°Ñ (1).xlsx",
+    "fileSize": 2780857,
+    "fileSizeKB": "2715.68",
+    "isRevised": false,
+    "fileType": "НОВЫЙ ФАЙЛ",
+    "message": "НОВЫЙ ФАЙЛ: Начало анализа файла: Ð­Ð»ÐµÐºÑÑÐ¸ÐºÐ° Ð½Ð¾Ð²Ð°Ñ (1).xlsx"
+  },
+  {
+    "type": "analysis_complete",
+    "sessionId": "1774347313855",
+    "timestamp": "2026-03-24T10:15:18.982Z",
+    "user": {
+      "fullname": "Батырхан",
+      "institution": "СФК"
+    },
+    "filename": "Ð­Ð»ÐµÐºÑÑÐ¸ÐºÐ° Ð½Ð¾Ð²Ð°Ñ (1).xlsx",
+    "estimateName": "Электрика новая",
+    "isRevised": false,
+    "fileType": "НОВЫЙ ФАЙЛ",
+    "totalAmount": 12637152.39,
+    "totalAmountFormatted": "12 637 152,39",
+    "totalVatText": "Всего",
+    "totalVatPercent": null,
+    "totalAmountRow": 4737,
+    "totalCodes": 606,
+    "foundCodes": 474,
+    "notFoundCodes": 132,
+    "exactMatches": 0,
+    "parentMatches": 0,
+    "sbornikMatches": 423,
+    "textLines": 51,
+    "restorationCodes": 0,
+    "message": "НОВЫЙ ФАЙЛ: Завершение анализа: Ð­Ð»ÐµÐºÑÑÐ¸ÐºÐ° Ð½Ð¾Ð²Ð°Ñ (1).xlsx, найдено 474 из 606, сумма: 12 637 152,39"
+  }
+]

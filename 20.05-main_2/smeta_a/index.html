@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Сметная Админ-панель | Управление сметными кодами</title>
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Основные стили -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <script>
+        // Проверка авторизации при загрузке
+        if (!localStorage.getItem('admin_user')) {
+            window.location.href = '/login.html';
+        }
+    </script>
+    
+    <!-- Main App Container -->
+    <div id="appContainer" class="hidden">
+        <div class="app-layout">
+            <!-- ==================== SIDEBAR ==================== -->
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <div class="logo">
+                        <div class="logo-icon">
+                            <i class="fas fa-calculator"></i>
+                        </div>
+                        <div>
+                            <h1>Сметная</h1>
+                            <p>Управление кодами</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <nav class="sidebar-nav">
+                    <div class="nav-items">
+                        <a href="#" onclick="switchTab('dashboard')" class="nav-item active" data-tab="dashboard">
+                            <i class="fas fa-chart-line"></i>
+                            <span>Дашборд</span>
+                        </a>
+                        <a href="#" onclick="switchTab('exactCodes')" class="nav-item" data-tab="exactCodes">
+                            <i class="fas fa-check-circle"></i>
+                            <span>Точные коды</span>
+                        </a>
+                        <a href="#" onclick="switchTab('hierarchicalCodes')" class="nav-item" data-tab="hierarchicalCodes">
+                            <i class="fas fa-sitemap"></i>
+                            <span>Иерархические коды</span>
+                        </a>
+                        <a href="#" onclick="switchTab('parentCodes')" class="nav-item" data-tab="parentCodes">
+                            <i class="fas fa-code-branch"></i>
+                            <span>Родительские коды</span>
+                        </a>
+                        <a href="#" onclick="switchTab('relations')" class="nav-item" data-tab="relations">
+                            <i class="fas fa-link"></i>
+                            <span>Связи кодов</span>
+                        </a>
+                        <a href="#" onclick="switchTab('templates')" class="nav-item" data-tab="templates">
+                            <i class="fas fa-file-alt"></i>
+                            <span>Шаблоны</span>
+                        </a>
+                        <a href="#" onclick="switchTab('validator')" class="nav-item" data-tab="validator">
+                            <i class="fas fa-microphone-alt"></i>
+                            <span>Валидатор</span>
+                        </a>
+                        <a href="#" onclick="switchTab('analytics')" class="nav-item" data-tab="analytics">
+                            <i class="fas fa-chart-pie"></i>
+                            <span>Аналитика</span>
+                        </a>
+                        <a href="#" onclick="switchTab('managerDashboard')" class="nav-item" data-tab="managerDashboard">
+                            <i class="fas fa-tachometer-alt"></i>
+                            <span>Дашборд рук-ля</span>
+                        </a>
+                        <a href="#" onclick="switchTab('projects')" class="nav-item" data-tab="projects">
+                            <i class="fas fa-folder-open"></i>
+                            <span>Проекты</span>
+                        </a>
+                        <a href="#" onclick="switchTab('users')" class="nav-item" data-tab="users">
+                            <i class="fas fa-users"></i>
+                            <span>Пользователи</span>
+                        </a>
+                    </div>
+                </nav>
+                
+                <div class="sidebar-footer">
+                    <div class="user-info">
+                        <div class="user-avatar">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div class="user-details">
+                            <p class="user-name" id="adminName">Администратор</p>
+                            <p class="user-login" id="adminLogin">admin</p>
+                        </div>
+                        <button onclick="adminLogout()" class="logout-btn" title="Выйти">
+                            <i class="fas fa-sign-out-alt"></i>
+                        </button>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- ==================== MAIN CONTENT ==================== -->
+            <main class="main-content">
+                <header class="content-header">
+                    <div class="header-left">
+                        <button id="mobileMenuBtn" class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <h2 id="pageTitle">Дашборд</h2>
+                    </div>
+                    <div class="header-right">
+                        <button onclick="refreshData()" id="globalRefreshBtn" class="refresh-btn" title="Обновить данные">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                        <div id="lastUpdate" class="last-update">
+                            <i class="fas fa-clock"></i>
+                            <span>--:--:--</span>
+                        </div>
+                    </div>
+                </header>
+
+                <div class="content-body">
+                    <!-- ==================== DASHBOARD TAB ==================== -->
+                    <div id="dashboardTab" class="tab-content">
+                        <div class="stats-grid">
+                            <div class="stat-card" onclick="switchTab('exactCodes')">
+                                <div class="stat-card-inner">
+                                    <div class="stat-info">
+                                        <p class="stat-label">Всего кодов</p>
+                                        <p class="stat-value" id="totalCodes">0</p>
+                                    </div>
+                                    <div class="stat-icon purple">
+                                        <i class="fas fa-database"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="stat-card" onclick="switchTab('exactCodes')">
+                                <div class="stat-card-inner">
+                                    <div class="stat-info">
+                                        <p class="stat-label">Точные коды</p>
+                                        <p class="stat-value" id="exactCodesCount">0</p>
+                                    </div>
+                                    <div class="stat-icon green">
+                                        <i class="fas fa-check-circle"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="stat-card" onclick="switchTab('hierarchicalCodes')">
+                                <div class="stat-card-inner">
+                                    <div class="stat-info">
+                                        <p class="stat-label">Иерархические</p>
+                                        <p class="stat-value" id="hierarchicalCodesCount">0</p>
+                                    </div>
+                                    <div class="stat-icon indigo">
+                                        <i class="fas fa-sitemap"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="stat-card" onclick="switchTab('parentCodes')">
+                                <div class="stat-card-inner">
+                                    <div class="stat-info">
+                                        <p class="stat-label">Родительские</p>
+                                        <p class="stat-value" id="parentCodesCount">0</p>
+                                    </div>
+                                    <div class="stat-icon blue">
+                                        <i class="fas fa-code-branch"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="stat-card" onclick="switchTab('relations')">
+                                <div class="stat-card-inner">
+                                    <div class="stat-info">
+                                        <p class="stat-label">Связи</p>
+                                        <p class="stat-value" id="relationsCount">0</p>
+                                    </div>
+                                    <div class="stat-icon orange">
+                                        <i class="fas fa-link"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-inner">
+                                    <div class="stat-info">
+                                        <p class="stat-label">Реставрационные</p>
+                                        <p class="stat-value" id="restorationCodes">0</p>
+                                    </div>
+                                    <div class="stat-icon teal">
+                                        <i class="fas fa-landmark"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-inner">
+                                    <div class="stat-info">
+                                        <p class="stat-label">Доступные</p>
+                                        <p class="stat-value" id="availableCodes">0</p>
+                                    </div>
+                                    <div class="stat-icon emerald">
+                                        <i class="fas fa-thumbs-up"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-inner">
+                                    <div class="stat-info">
+                                        <p class="stat-label">Требуют внимания</p>
+                                        <p class="stat-value" id="warningCodes">0</p>
+                                    </div>
+                                    <div class="stat-icon amber">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="secondary-stats">
+                            <div class="stat-mini">
+                                <i class="fas fa-book"></i>
+                                <div>
+                                    <p class="stat-mini-label">Главы</p>
+                                    <p class="stat-mini-value" id="chaptersCount">0</p>
+                                </div>
+                            </div>
+                            <div class="stat-mini">
+                                <i class="fas fa-layer-group"></i>
+                                <div>
+                                    <p class="stat-mini-label">Сборники</p>
+                                    <p class="stat-mini-value" id="collectionsCount">0</p>
+                                </div>
+                            </div>
+                            <div class="stat-mini">
+                                <i class="fas fa-folder-open"></i>
+                                <div>
+                                    <p class="stat-mini-label">Отделы</p>
+                                    <p class="stat-mini-value" id="sectionsCount">0</p>
+                                </div>
+                            </div>
+                            <div class="stat-mini">
+                                <i class="fas fa-table"></i>
+                                <div>
+                                    <p class="stat-mini-label">Таблицы</p>
+                                    <p class="stat-mini-value" id="tablesCount">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="charts-row">
+                            <div class="chart-card">
+                                <h3>Распределение по статусам</h3>
+                                <canvas id="statusChart" width="400" height="300"></canvas>
+                            </div>
+                            <div class="chart-card">
+                                <h3>Последние добавленные коды</h3>
+                                <div id="recentCodesList" class="recent-codes-list"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ==================== EXACT CODES TAB ==================== -->
+<!-- ==================== EXACT CODES TAB ==================== -->
+<div id="exactCodesTab" class="tab-content hidden">
+    <div class="content-card">
+        <div class="card-header">
+            <h3><i class="fas fa-check-circle"></i> Точные коды</h3>
+            <div class="card-actions">
+                <button onclick="openAddExactModal()" class="btn-primary">
+                    <i class="fas fa-plus"></i> Добавить точный код
+                </button>
+                <button onclick="openDeleteExactModal()" class="btn-danger">
+                    <i class="fas fa-trash-alt"></i> Удалить выбранные
+                </button>
+                <div class="card-search">
+                    <input type="text" id="searchExactInput" placeholder="Поиск по коду или описанию..." class="search-input">
+                    <i class="fas fa-search search-icon"></i>
+                </div>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Код</th>
+                        <th>Описание</th>
+                        <th>Статус</th>
+                        <th>Точный</th>
+                        <th>Коэф.</th>
+                        <th>Значение</th>
+                        <th>Проверять</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody id="exactTableBody">
+                    <tr><td colspan="9" class="text-center py-8 text-gray-500">Загрузка...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="card-footer">
+            <i class="fas fa-info-circle"></i> Точные коды - полное совпадение с нормативом. Приоритет выше всех остальных типов кодов.
+        </div>
+    </div>
+</div>
+                                <div class="card-search">
+                                    <input type="text" id="searchExactInput" placeholder="Поиск по коду или описанию..." class="search-input">
+                                    <i class="fas fa-search search-icon"></i>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr><th>ID</th><th>Код</th><th>Описание</th><th>Статус</th><th>Точный</th><th>Коэф.</th><th>Значение</th><th>Действия</th></tr>
+                                    </thead>
+                                    <tbody id="exactTableBody"><tr><td colspan="8" class="text-center py-8 text-gray-500">Загрузка...</td></tr>
+                                </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ==================== HIERARCHICAL CODES TAB ==================== -->
+                    <div id="hierarchicalCodesTab" class="tab-content hidden">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <div class="card-actions">
+                                    <button onclick="openAddHierarchicalModal()" class="btn-primary">
+                                        <i class="fas fa-plus"></i> Добавить иерархический код
+                                    </button>
+                                </div>
+                                <div class="card-search">
+                                    <input type="text" id="searchHierarchicalInput" placeholder="Поиск..." class="search-input">
+                                    <i class="fas fa-search search-icon"></i>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="data-table">
+                                    <thead><tr><th>ID</th><th>Уровень</th><th>Код</th><th>Описание</th><th>Статус</th><th>Коэф.</th><th>Значение</th><th>Действия</th></tr></thead>
+                                    <tbody id="hierarchicalTableBody"><tr><td colspan="8" class="text-center py-8 text-gray-500">Загрузка...</td></tr>
+                                </tbody>
+                                </table>
+                            </div>
+                            <div class="card-footer">
+                                <i class="fas fa-info-circle"></i> Иерархические коды: глава → сборник → отдел → таблица. Приоритет: точный код > таблица > отдел > сборник > глава.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ==================== PARENT CODES TAB ==================== -->
+                    <div id="parentCodesTab" class="tab-content hidden">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <div class="card-actions">
+                                    <button onclick="openAddParentModal()" class="btn-primary">
+                                        <i class="fas fa-plus"></i> Добавить родительский код
+                                    </button>
+                                    <button onclick="openDeleteParentModal()" class="btn-danger">
+                                        <i class="fas fa-trash-alt"></i> Удалить выбранные
+                                    </button>
+                                </div>
+                                <div class="card-search">
+                                    <input type="text" id="searchParentInput" placeholder="Поиск..." class="search-input">
+                                    <i class="fas fa-search search-icon"></i>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="data-table">
+                                    <thead><tr><th>ID</th><th>Код</th><th>Описание</th><th>Статус</th><th>Коэф.</th><th>Значение</th><th>Действия</th></tr></thead>
+                                    <tbody id="parentTableBody"><tr><td colspan="7" class="text-center py-8 text-gray-500">Загрузка...</td></tr>
+                                </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ==================== RELATIONS TAB ==================== -->
+                   <!-- Вкладка "Связи кодов" -->
+<div id="relationsTab" class="tab-content hidden">
+    <div class="content-card">
+        <div class="card-header">
+            <h3><i class="fas fa-link"></i> Связи между кодами</h3>
+            <div class="card-actions">
+                <button onclick="openAddRelationModal()" class="btn-primary">
+                    <i class="fas fa-link"></i> Обычная связь
+                </button>
+                <button onclick="openAddExtendedRelationModal()" class="btn-primary" style="background: linear-gradient(135deg, #8b5cf6, #6d28d9);">
+                    <i class="fas fa-brain"></i> Расширенная связь
+                </button>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr><th>ID</th><th>Исходный код</th><th>Целевой код</th><th>Тип</th><th>Описание</th><th>Действия</th></tr>
+                </thead>
+                <tbody id="relationsTableBody"><tr><td colspan="6" class="text-center py-8 text-gray-500">Загрузка...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="card-footer text-sm text-gray-500">
+            <i class="fas fa-info-circle"></i> 
+            <strong>Обычные связи</strong> (🔄 Дублирующий, 🔗 Связанный) — для альтернативных кодов.<br>
+            <strong>Расширенные связи</strong> (🤝 Должны быть вместе, ⚡ Противоречат, 📊 Проверить коэф., 🔍 Условный) — для логических проверок.
+        </div>
+    </div>
+</div>
+                    <!-- ==================== TEMPLATES TAB ==================== -->
+                    <div id="templatesTab" class="tab-content hidden">
+                        <div class="content-card">
+                            <div class="templates-grid">
+                                <div class="template-card purple">
+                                    <h4>Отдел 51</h4>
+                                    <code>^\d+\.\d+-51\d{2}-\d+-\d+/\d+$</code>
+                                    <p>Пример: 1.7-5102-3-1/1</p>
+                                </div>
+                                <div class="template-card green">
+                                    <h4>Отдел 52</h4>
+                                    <code>^\d+\.\d+-52\d{2}-\d+-\d+/\d+$</code>
+                                    <p>Пример: 1.7-5202-3-1/1</p>
+                                </div>
+                                <div class="template-card blue">
+                                    <h4>Отдел 53</h4>
+                                    <code>^\d+\.\d+-53\d{2}-\d+-\d+/\d+$</code>
+                                    <p>Пример: 1.7-5302-3-1/1</p>
+                                </div>
+                            </div>
+                            <div class="info-box">
+                                <h4>Иерархическая структура кода</h4>
+                                <code class="example-code">1.21-1303-33-6/1</code>
+                                <div class="structure-grid">
+                                    <div><span>Глава:</span> <strong>1</strong></div>
+                                    <div><span>Сборник:</span> <strong>21</strong></div>
+                                    <div><span>Отдел:</span> <strong>1303</strong></div>
+                                    <div><span>Таблица:</span> <strong>33</strong></div>
+                                    <div><span>Норматив:</span> <strong>6/1</strong></div>
+                                </div>
+                                <p>Система ищет код последовательно: точный код → таблица → отдел → сборник → глава</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ==================== VALIDATOR TAB ==================== -->
+                    <div id="validatorTab" class="tab-content hidden">
+                        <div class="content-card">
+                            <div class="validator-input">
+                                <input type="text" id="validatorCodeInput" placeholder="Введите код для проверки..." class="validator-field">
+                                <button onclick="validateCode()" class="btn-primary">
+                                    <i class="fas fa-check-circle"></i> Проверить
+                                </button>
+                            </div>
+                            <div id="validationResult" class="validation-result hidden"></div>
+                            <div class="examples-section">
+                                <h4>Примеры для проверки</h4>
+                                <div class="examples-grid">
+                                    <button onclick="setExampleCode('1')" class="example-btn"><code>1</code><span>Глава</span></button>
+                                    <button onclick="setExampleCode('1.21')" class="example-btn"><code>1.21</code><span>Сборник</span></button>
+                                    <button onclick="setExampleCode('1.21-1303')" class="example-btn"><code>1.21-1303</code><span>Отдел</span></button>
+                                    <button onclick="setExampleCode('1.21-1303-33')" class="example-btn"><code>1.21-1303-33</code><span>Таблица</span></button>
+                                    <button onclick="setExampleCode('1.21-1303-33-6/1')" class="example-btn"><code>1.21-1303-33-6/1</code><span>Точный код</span></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ==================== ANALYTICS TAB ==================== -->
+                    <div id="analyticsTab" class="tab-content hidden">
+                        <div class="content-card">
+                            <div class="analytics-header">
+                                <h3><i class="fas fa-chart-line"></i> Аналитика по пользователям</h3>
+                                <div class="analytics-controls">
+                                    <select id="analyticsProjectSelect" class="filter-select" onchange="filterByProject()">
+                                        <option value="">Все проекты</option>
+                                    </select>
+                                    <select id="periodSelect" class="filter-select" onchange="changePeriod()">
+                                        <option value="7">7 дней</option>
+                                        <option value="14">14 дней</option>
+                                        <option value="30" selected>30 дней</option>
+                                        <option value="90">90 дней</option>
+                                    </select>
+                                    <button onclick="refreshAnalytics()" class="btn-outline"><i class="fas fa-sync-alt"></i></button>
+                                    <button onclick="exportSessionsCSV()" class="btn-success"><i class="fas fa-download"></i> CSV</button>
+                                    <button onclick="downloadUsageReport()" class="btn-primary"><i class="fas fa-file-excel"></i> Отчёт Excel</button>
+                                </div>
+                                <div id="analyticsLastUpdate" style="margin-top: 12px; text-align: right; font-size: 11px; color: #94a3b8;">
+                                    <i class="fas fa-clock"></i> Загрузка...
+                                </div>
+                            </div>
+                            <div class="analytics-stats">
+                                <div class="analytics-stat"><p>Всего сессий</p><strong id="totalSessions">0</strong></div>
+                                <div class="analytics-stat"><p>Кодов</p><strong id="totalCodesCount">0</strong></div>
+                                <div class="analytics-stat"><p>Средняя точность</p><strong class="text-green" id="avgAccuracy">0%</strong></div>
+                                <div class="analytics-stat"><p>Общая сумма</p><strong class="text-indigo" id="totalAmount">0 ₽</strong></div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="data-table">
+                                    <thead><tr><th>#</th><th>Пользователь</th><th>Учреждение</th><th>Последняя активность</th><th>Сессий</th><th>Файлов</th><th>Кодов</th><th>Найдено</th><th>Точность</th><th>Детали</th><th></th></tr></thead>
+                                    <tbody id="usersAnalyticsTableBody"><tr><td colspan="11" class="text-center py-8 text-gray-500">Загрузка...</td></tr>
+                                </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ==================== MANAGER DASHBOARD TAB ==================== -->
+                    <div id="managerDashboardTab" class="tab-content hidden">
+                        <div class="dashboard-grid">
+                            <div class="dashboard-card"><p>Сессий сегодня</p><strong id="todaySessions">0</strong></div>
+                            <div class="dashboard-card"><p>Точность</p><strong class="text-green" id="todayAccuracy">0%</strong></div>
+                            <div class="dashboard-card"><p>Сумма</p><strong class="text-indigo" id="todayAmount">0 ₽</strong></div>
+                            <div class="dashboard-card"><p>Коды</p><strong id="todayCodes">0/0</strong></div>
+                        </div>
+                        <div class="dashboard-row">
+                            <div class="dashboard-widget"><h4>Топ пользователей</h4><div id="topUsersWidget">Загрузка...</div></div>
+                            <div class="dashboard-widget"><h4>Топ проблемных кодов</h4><div id="topProblemsWidget">Загрузка...</div></div>
+                        </div>
+                        <button onclick="loadTopProblemCodes()" class="btn-primary"><i class="fas fa-list"></i> Полный список проблемных кодов</button>
+                    </div>
+
+                    <!-- ==================== PROJECTS TAB ==================== -->
+                    <div id="projectsTab" class="tab-content hidden">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <div><h3><i class="fas fa-folder-open"></i> Проекты пользователей</h3><p class="text-sm text-gray-500">Управление проектами и просмотр статистики</p></div>
+                                <div class="card-actions">
+                                    <select id="projectStatusFilter" class="filter-select" onchange="filterProjects()">
+                                        <option value="all">Все проекты</option>
+                                        <option value="active">Активные</option>
+                                        <option value="archived">Архивные</option>
+                                    </select>
+                                    <button onclick="refreshProjects()" class="btn-outline"><i class="fas fa-sync-alt"></i></button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="data-table">
+                                    <thead><tr><th>ID</th><th>Проект</th><th>Пользователь</th><th>Учреждение</th><th>Статус</th><th>Файлов</th><th>Позиций</th><th>Проблемы</th><th>Создан</th><th>Обновлён</th><th>Действия</th></tr></thead>
+                                    <tbody id="projectsTableBody"><tr><td colspan="11" class="text-center py-8 text-gray-500">Загрузка...</td></tr>
+                                </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ==================== USERS TAB ==================== -->
+                    <div id="usersTab" class="tab-content hidden">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <h3><i class="fas fa-users"></i> Управление пользователями</h3>
+                                <button onclick="openAddUserModal()" class="btn-primary"><i class="fas fa-plus"></i> Добавить пользователя</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="data-table">
+                                    <thead><tr><th>ID</th><th>Логин</th><th>ФИО</th><th>Учреждение</th><th>Роль</th><th>Статус</th><th>Последний вход</th><th>Действия</th></tr></thead>
+                                    <tbody id="usersTableBody"><tr><td colspan="8" class="text-center py-8 text-gray-500">Загрузка...</td></tr>
+                                </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- ==================== MODALS ==================== -->
+    <div id="modal" class="modal-overlay hidden">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h2 id="modalTitle">Заголовок</h2>
+                <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="modalBody" class="modal-body"></div>
+        </div>
+    </div>
+
+    <div id="sessionModal" class="modal-overlay hidden">
+        <div class="modal-container modal-lg">
+            <div class="modal-header">
+                <h2 id="sessionModalTitle">Детали сессии</h2>
+                <button class="modal-close" onclick="closeSessionModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="sessionModalBody" class="modal-body"></div>
+        </div>
+    </div>
+
+    <div id="projectDetailModal" class="modal-overlay hidden">
+        <div class="modal-container modal-lg">
+            <div class="modal-header">
+                <h2 id="projectDetailTitle">Детали проекта</h2>
+                <button class="modal-close" onclick="closeProjectDetailModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="projectDetailBody" class="modal-body"></div>
+        </div>
+    </div>
+
+    <div id="userSessionsModal" class="modal-overlay hidden">
+        <div class="modal-container modal-lg">
+            <div class="modal-header">
+                <h2 id="userSessionsModalTitle">Сессии пользователя</h2>
+                <button class="modal-close" onclick="closeUserSessionsModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="userSessionsModalBody" class="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="admin.js"></script>
+    <script>
+        function toggleMobileMenu() {
+            document.querySelector('.sidebar').classList.toggle('mobile-open');
+        }
+        window.addEventListener('resize', function() {
+            if (window.innerWidth > 768) {
+                document.querySelector('.sidebar')?.classList.remove('mobile-open');
+            }
+        });
+    </script>
+</body>
+</html>

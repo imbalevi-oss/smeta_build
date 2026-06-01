@@ -1,0 +1,462 @@
+[
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T06:33:16.131Z",
+    "method": "GET",
+    "endpoint": "/",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T06:33:16.144Z",
+    "method": "GET",
+    "endpoint": "/",
+    "status": 304,
+    "durationMs": 13,
+    "message": "GET / - 304 (13ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T06:33:16.155Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /analyzer.js"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T06:33:16.158Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "status": 304,
+    "durationMs": 3,
+    "message": "GET /analyzer.js - 304 (3ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T06:33:16.267Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /api/health"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T06:33:16.276Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "status": 200,
+    "durationMs": 9,
+    "message": "GET /api/health - 200 (9ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T06:33:20.645Z",
+    "method": "POST",
+    "endpoint": "/api/analyze",
+    "params": {
+      "query": {},
+      "bodySize": "184203"
+    },
+    "message": "POST /api/analyze"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T06:33:21.140Z",
+    "method": "POST",
+    "endpoint": "/api/analyze",
+    "status": 200,
+    "durationMs": 495,
+    "message": "POST /api/analyze - 200 (495ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T06:37:14.076Z",
+    "method": "GET",
+    "endpoint": "/",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T06:37:14.081Z",
+    "method": "GET",
+    "endpoint": "/",
+    "status": 304,
+    "durationMs": 5,
+    "message": "GET / - 304 (5ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T06:37:14.089Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /analyzer.js"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T06:37:14.091Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "status": 304,
+    "durationMs": 2,
+    "message": "GET /analyzer.js - 304 (2ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T06:37:14.235Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /api/health"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T06:37:14.241Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "status": 200,
+    "durationMs": 6,
+    "message": "GET /api/health - 200 (6ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T10:14:32.188Z",
+    "method": "GET",
+    "endpoint": "/",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T10:14:32.202Z",
+    "method": "GET",
+    "endpoint": "/",
+    "status": 304,
+    "durationMs": 14,
+    "message": "GET / - 304 (14ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T10:14:32.215Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /analyzer.js"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T10:14:32.219Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "status": 304,
+    "durationMs": 4,
+    "message": "GET /analyzer.js - 304 (4ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T10:14:32.352Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /api/health"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T10:14:32.361Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "status": 200,
+    "durationMs": 9,
+    "message": "GET /api/health - 200 (9ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T10:14:32.387Z",
+    "method": "GET",
+    "endpoint": "/favicon.ico",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /favicon.ico"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T10:14:32.391Z",
+    "method": "GET",
+    "endpoint": "/favicon.ico",
+    "status": 404,
+    "durationMs": 4,
+    "message": "GET /favicon.ico - 404 (4ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T10:14:35.443Z",
+    "method": "POST",
+    "endpoint": "/api/analyze",
+    "params": {
+      "query": {},
+      "bodySize": "184193"
+    },
+    "message": "POST /api/analyze"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T10:14:35.977Z",
+    "method": "POST",
+    "endpoint": "/api/analyze",
+    "status": 200,
+    "durationMs": 534,
+    "message": "POST /api/analyze - 200 (534ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T10:15:13.612Z",
+    "method": "POST",
+    "endpoint": "/api/analyze",
+    "params": {
+      "query": {},
+      "bodySize": "2781440"
+    },
+    "message": "POST /api/analyze"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T10:15:19.008Z",
+    "method": "POST",
+    "endpoint": "/api/analyze",
+    "status": 200,
+    "durationMs": 5396,
+    "message": "POST /api/analyze - 200 (5396ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T11:08:26.372Z",
+    "method": "GET",
+    "endpoint": "/",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T11:08:26.385Z",
+    "method": "GET",
+    "endpoint": "/",
+    "status": 304,
+    "durationMs": 14,
+    "message": "GET / - 304 (14ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T11:08:26.399Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /analyzer.js"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T11:08:26.403Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "status": 304,
+    "durationMs": 4,
+    "message": "GET /analyzer.js - 304 (4ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T11:08:26.531Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /api/health"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T11:08:26.540Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "status": 200,
+    "durationMs": 9,
+    "message": "GET /api/health - 200 (9ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T11:08:45.615Z",
+    "method": "GET",
+    "endpoint": "/",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T11:08:45.619Z",
+    "method": "GET",
+    "endpoint": "/",
+    "status": 304,
+    "durationMs": 4,
+    "message": "GET / - 304 (4ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T11:08:45.626Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /analyzer.js"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T11:08:45.629Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "status": 304,
+    "durationMs": 3,
+    "message": "GET /analyzer.js - 304 (3ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T11:08:45.713Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /api/health"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T11:08:45.718Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "status": 200,
+    "durationMs": 5,
+    "message": "GET /api/health - 200 (5ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T11:08:59.462Z",
+    "method": "GET",
+    "endpoint": "/",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T11:08:59.466Z",
+    "method": "GET",
+    "endpoint": "/",
+    "status": 304,
+    "durationMs": 4,
+    "message": "GET / - 304 (4ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T11:08:59.476Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /analyzer.js"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T11:08:59.479Z",
+    "method": "GET",
+    "endpoint": "/analyzer.js",
+    "status": 304,
+    "durationMs": 3,
+    "message": "GET /analyzer.js - 304 (3ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T11:08:59.621Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /api/health"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T11:08:59.626Z",
+    "method": "GET",
+    "endpoint": "/api/health",
+    "status": 200,
+    "durationMs": 5,
+    "message": "GET /api/health - 200 (5ms)"
+  },
+  {
+    "type": "api_request",
+    "timestamp": "2026-03-24T11:08:59.665Z",
+    "method": "GET",
+    "endpoint": "/favicon.ico",
+    "params": {
+      "query": {},
+      "bodySize": "0"
+    },
+    "message": "GET /favicon.ico"
+  },
+  {
+    "type": "api_response",
+    "timestamp": "2026-03-24T11:08:59.669Z",
+    "method": "GET",
+    "endpoint": "/favicon.ico",
+    "status": 404,
+    "durationMs": 4,
+    "message": "GET /favicon.ico - 404 (4ms)"
+  }
+]

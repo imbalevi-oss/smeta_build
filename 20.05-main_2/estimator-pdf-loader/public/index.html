@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Состав работ – загрузка PDF</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>📄 Загрузить норматив (только состав работ)</h1>
+    <p class="subtitle">Глава 1, Сборник 1 – извлекаются только ресурсы для каждого шифра</p>
+
+    <div class="section-block">
+      <h2>⬆️ Загрузка PDF</h2>
+      <form id="uploadForm">
+        <input type="file" id="fileInput" accept=".pdf" required>
+        <button type="submit" class="btn btn-upload" id="submitBtn">📤 Загрузить</button>
+      </form>
+      <div id="uploadProgress" class="progress-container hidden">
+        <div class="progress-info"><span id="progressStatus">⏳ Обработка...</span><span id="progressPercent">0%</span></div>
+        <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+        <div id="progressDetail" class="progress-detail"></div>
+      </div>
+      <div id="message"></div>
+    </div>
+
+    <div class="section-block search-section">
+      <h2>🔍 Поиск по шифру или коду ресурса</h2>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="Например, 1-3101-1-1/1 или 21.1-9-1" autocomplete="off">
+        <button id="searchBtn" class="btn btn-search">🔍 Найти</button>
+      </div>
+      <div id="searchProgress" class="progress-container hidden">
+        <div class="progress-info"><span>Поиск...</span></div>
+        <div class="progress-bar"><div class="progress-fill progress-fill-animated"></div></div>
+      </div>
+      <div id="searchResults" class="search-results"></div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('uploadForm');
+    const fileInput = document.getElementById('fileInput');
+    const submitBtn = document.getElementById('submitBtn');
+    const messageDiv = document.getElementById('message');
+    const uploadProgress = document.getElementById('uploadProgress');
+    const progressFill = document.getElementById('progressFill');
+    const progressStatus = document.getElementById('progressStatus');
+    const progressPercent = document.getElementById('progressPercent');
+    const progressDetail = document.getElementById('progressDetail');
+    const searchResults = document.getElementById('searchResults');
+    const searchProgress = document.getElementById('searchProgress');
+
+    let progressInterval;
+    function startProgress() {
+      uploadProgress.classList.remove('hidden');
+      progressFill.style.width = '0%';
+      progressPercent.textContent = '0%';
+      progressStatus.textContent = '⏳ Чтение PDF...';
+      let p = 0;
+      progressInterval = setInterval(() => {
+        p += Math.random() * 15;
+        if (p > 90) p = 90;
+        progressFill.style.width = p + '%';
+        progressPercent.textContent = Math.round(p) + '%';
+        if (p > 60) progressStatus.textContent = '🔍 Извлечение состава работ...';
+      }, 500);
+    }
+    function stopProgress(success) {
+      clearInterval(progressInterval);
+      progressFill.style.width = '100%';
+      progressPercent.textContent = '100%';
+      progressStatus.textContent = success ? '✅ Готово' : '❌ Ошибка';
+      progressDetail.textContent = '';
+      setTimeout(() => uploadProgress.classList.add('hidden'), 2500);
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!fileInput.files[0]) return;
+      submitBtn.disabled = true;
+      messageDiv.className = 'message hidden';
+      startProgress();
+      const fd = new FormData();
+      fd.append('pdf', fileInput.files[0]);
+      try {
+        const res = await fetch('/api/upload-pdf', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        stopProgress(true);
+        showMessage(`✅ Загружено ресурсов: ${data.resources}, коэффициентов: ${data.coefficients}`, 'success');
+      } catch (err) {
+        stopProgress(false);
+        showMessage(`❌ ${err.message}`, 'error');
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    function showMessage(text, type) {
+      messageDiv.className = `message ${type}`;
+      messageDiv.textContent = text;
+    }
+
+    document.getElementById('searchBtn').addEventListener('click', performSearch);
+    document.getElementById('searchInput').addEventListener('keypress', e => { if (e.key === 'Enter') performSearch(); });
+
+    async function performSearch() {
+      const q = document.getElementById('searchInput').value.trim();
+      if (!q) return;
+      searchProgress.classList.remove('hidden');
+      searchResults.innerHTML = '';
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        searchProgress.classList.add('hidden');
+        displayResults(data.results);
+      } catch (err) {
+        searchProgress.classList.add('hidden');
+        searchResults.innerHTML = `<p class="search-error">❌ Ошибка поиска</p>`;
+      }
+    }
+
+    function displayResults(results) {
+      if (!results.length) {
+        searchResults.innerHTML = '<p class="search-empty">Ничего не найдено</p>';
+        return;
+      }
+      let html = `<p class="search-count">Найдено: ${results.length}</p>`;
+      results.forEach(r => {
+        if (r.type === 'resource_group') {
+          html += `<div class="search-card resource-card">
+            <div class="card-header"><span class="badge badge-resource">📦 Состав работ</span><code>${escapeHtml(r.norm_code)}</code></div>
+            <div class="card-body">
+              <p><strong>Ресурсы:</strong></p>
+              <div class="resources-list">
+                ${r.resources.map(res => `
+                  <div class="resource-item">
+                    <code>${escapeHtml(res.resource_code)}</code>
+                    <span>${escapeHtml(res.resource_name)}</span>
+                    <span class="resource-qty">${res.quantity} ${res.unit}</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>`;
+        } else if (r.type === 'coefficient') {
+          html += `<div class="search-card coeff-card">
+            <div class="card-header"><span class="badge badge-coeff">📊 Коэффициент</span><span>${escapeHtml(r.applies_to)}</span></div>
+            <div class="card-body">
+              <p><strong>${escapeHtml(r.condition_text)}</strong></p>
+              <p>👷 Труд: ${r.labor_coeff} | 💰 З/п: ${r.wage_coeff} | 🚜 Маш: ${r.machine_coeff || '—'}</p>
+            </div>
+          </div>`;
+        }
+      });
+      searchResults.innerHTML = html;
+    }
+
+    function escapeHtml(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
+  </script>
+</body>
+</html>

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Проверка смет</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-screen">
+        <div class="login-card">
+            <div class="login-icon"><i class="fas fa-shield-alt"></i></div>
+            <div class="login-title">
+                <h1>Проверка смет</h1>
+                <p>Система анализа сметной документации</p>
+            </div>
+            <div class="input-group">
+                <label>Логин</label>
+                <input type="text" id="loginUsername" placeholder="Введите логин" autocomplete="username">
+            </div>
+            <div class="input-group">
+                <label>Пароль</label>
+                <input type="password" id="loginPassword" placeholder="Введите пароль" autocomplete="current-password">
+            </div>
+            <button class="login-btn" onclick="login()"><i class="fas fa-sign-in-alt" style="margin-right:8px;"></i> Войти</button>
+            <div id="loginError" style="margin-top:16px;text-align:center;font-size:13px;color:#dc2626;display:none;"></div>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="appContainer" class="app-container hidden">
+        <div class="app-header">
+            <div class="header-content">
+                <div class="logo-area">
+                    <div class="logo-icon"><i class="fas fa-gavel"></i></div>
+                    <div class="logo-text"><h2>Проверка смет</h2><p></p></div>
+                </div>
+                <div class="header-actions">
+                    <div class="db-status"><div class="status-dot"></div><span id="dbInfoText">База данных доступна</span></div>
+                    <button class="mosru-btn" onclick="window.open('https://www.mos.ru/depr/documents/cenovaya-politika/cenoobrazovanie-v-gorodskom-khozyaistve/', '_blank')"><i class="fas fa-external-link-alt"></i> Мос.ру</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="user-card">
+                <div class="user-info">
+                    <div class="user-avatar"><i class="fas fa-user-circle"></i></div>
+                    <span id="userName">Пользователь</span>
+                </div>
+                <button class="logout-btn" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Выйти</button>
+            </div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab active" data-tab="projects" id="tabProjects"><i class="fas fa-folder"></i> Мои проекты</button>
+                <button class="tab disabled" data-tab="workspace" id="tabWorkspace" disabled><i class="fas fa-edit"></i> Рабочая область</button>
+            </div>
+
+            <!-- Projects Tab -->
+            <div id="projectsTab" class="tab-content active" style="display:block;">
+                <div class="projects-section">
+                    <div class="projects-header">
+                        <h3><i class="fas fa-folder-open"></i> Мои проекты</h3>
+                        <button onclick="showNewProjectModal()" class="btn-purple"><i class="fas fa-plus"></i> Новый проект</button>
+                    </div>
+                    <div style="display:flex;gap:10px;margin-bottom:24px;border-bottom:1px solid #e2e8f0;padding-bottom:12px;">
+                        <button class="project-filter-chip active" data-filter="all" onclick="filterProjectsByStatus('all')"><i class="fas fa-list"></i> Все <span id="filterCountAll">0</span></button>
+                        <button class="project-filter-chip" data-filter="active" onclick="filterProjectsByStatus('active')"><i class="fas fa-play-circle"></i> Активные <span id="filterCountActive">0</span></button>
+                        <button class="project-filter-chip" data-filter="archived" onclick="filterProjectsByStatus('archived')"><i class="fas fa-archive"></i> В архиве <span id="filterCountArchived">0</span></button>
+                    </div>
+                    <div id="projectsList" class="projects-grid"></div>
+                </div>
+            </div>
+
+            <!-- Workspace Tab -->
+            <div id="workspaceTab" class="tab-content" style="display:none;">
+                <div class="project-workspace-header" id="workspaceHeader">
+                    <h2><i class="fas fa-folder-open"></i> Рабочая область</h2>
+                    <p>Выберите проект для начала работы</p>
+                </div>
+
+                <div id="noProjectSelected" class="empty-state" style="display:block;">
+                    <div class="empty-icon"><i class="fas fa-folder-open"></i></div>
+                    <h3 style="font-size:18px;font-weight:600;color:#4b5563;margin-bottom:8px;">Проект не выбран</h3>
+                    <p style="color:#9ca3af;margin-bottom:20px;">Выберите проект из списка или создайте новый</p>
+                    <button onclick="switchToProjectsTab()" class="btn-purple"><i class="fas fa-list"></i> К списку проектов</button>
+                </div>
+
+                <div id="workspaceContent" class="hidden" style="display:none;">
+                    <div class="check-mode-container">
+                        <div class="check-mode-header">
+                            <div class="check-mode-title"><i class="fas fa-cog"></i> Режим проверки:</div>
+                            <div class="check-mode-buttons">
+                                <button id="modeUniversal" class="mode-btn active" onclick="switchCheckMode('universal')"><i class="fas fa-magic"></i> Универсальный</button>
+                            </div>
+                        </div>
+                        <div id="modeDescription" class="mode-description"><i class="fas fa-info-circle"></i><span>Универсальный режим: автоматическое определение колонок по заголовкам</span></div>
+                    </div>
+
+<div class="upload-grid">
+    <!-- Зона сметы -->
+    <div>
+        <div id="dropArea" class="upload-card">
+            <input type="file" id="fileInput" accept=".xlsx,.xls" class="hidden">
+            <div class="upload-icon"><i class="fas fa-cloud-upload-alt"></i></div>
+            <div class="upload-title" id="dropText">Перетащите файл сметы сюда</div>
+            <div class="upload-subtitle">или нажмите для выбора</div>
+            <div class="upload-subtitle">.xlsx, .xls до 10 МБ</div>
+        </div>
+        <button type="button" id="analyzeEstimateBtn" class="analyze-btn analyze-estimate-btn" style="margin-top: 16px; width: 100%;" disabled>
+            <i class="fas fa-chart-line"></i> Анализировать смету
+        </button>
+    </div>
+
+    <!-- Зона КС-2 -->
+    <div>
+        <div id="ks2Area" class="upload-card ks2-card">
+            <input type="file" id="ks2Input" accept=".xlsx,.xls" multiple class="hidden">
+            <div class="upload-icon"><i class="fas fa-file-alt"></i></div>
+            <div class="upload-title" id="ks2DropText">Перетащите файлы КС-2 сюда</div>
+            <div class="upload-subtitle">или нажмите для выбора (можно несколько)</div>
+            <div class="upload-subtitle">.xlsx, .xls, до 10 МБ каждый</div>
+            <div id="ks2FileList" class="ks2-file-list"></div>
+        </div>
+        <button type="button" id="analyzeKs2Btn" class="analyze-btn ks2-analyze-btn" style="margin-top: 16px; width: 100%;" disabled>
+            <i class="fas fa-chart-line"></i> Анализировать КС-2
+        </button>
+    </div>
+</div>
+                    <!-- БЛОК ИСТОРИИ АНАЛИЗОВ -->
+                    <div id="historySection" class="history-section">
+                        <div class="history-header">
+                            <h3><i class="fas fa-history"></i> История анализов</h3>
+                            <button onclick="loadProjectHistory()" class="btn-sm btn-secondary"><i class="fas fa-sync-alt"></i> Обновить</button>
+                        </div>
+                        <div id="historyList" class="history-list">
+                            <div style="padding:30px;text-align:center;color:#9ca3af;"><i class="fas fa-spinner fa-spin"></i> Загрузка истории...</div>
+                        </div>
+                    </div>
+
+                    <div id="stats" class="hidden" style="display:none;"></div>
+
+                    <div id="results" class="hidden" style="display:none;">
+                        <div class="results-card">
+                            <div class="results-header">
+                                <div class="results-title"><i class="fas fa-table-list"></i><h3>Результаты проверки</h3></div>
+                                <div class="btn-group">
+                                    <button id="fullReportBtn" class="btn-icon btn-purple hidden" onclick="generateFullReport()"><i class="fas fa-chart-bar"></i> Полный отчёт</button>
+                                    <button id="excelReportBtn" class="btn-icon btn-purple hidden" onclick="downloadExcelReport()"><i class="far fa-file-excel"></i> Excel</button>
+                                    <button id="resetBtn" class="btn-icon btn-gray hidden" onclick="resetWorkspace()"><i class="fas fa-times"></i> Сброс</button>
+                                </div>
+                            </div>
+
+                            <div class="filter-bar">
+                                <span class="filter-label">Фильтр:</span>
+                                <button class="chip active" data-status="warning">⚠️ Обратите внимание</button>
+                                <button class="chip" data-status="notallowed">❌ Нельзя применить</button>
+                                <button class="chip" data-status="textonly">📝 Проверка цены поставщика</button>
+                            </div>
+
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>№ п/п</th>
+                                            <th>Код</th>
+                                            <th>Наименование</th>
+                                            <th>Статус</th>
+                                            <th>Причина</th>
+                                            <th>Сумма, ₽</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="emptyState" class="empty-state" style="display:block;">
+                        <div class="empty-icon"><i class="fas fa-file-excel"></i></div>
+                        <h3 style="font-size:18px;font-weight:600;color:#4b5563;margin-bottom:8px;">Нет данных</h3>
+                        <p style="color:#9ca3af;">Загрузите файл сметы и нажмите «Анализировать»</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Project Modal -->
+    <div id="newProjectModal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <h3><i class="fas fa-folder-plus"></i> Новый проект</h3>
+            <input type="text" id="newProjectName" placeholder="Название проекта" autocomplete="off">
+            <div class="modal-buttons">
+                <button class="btn-gray" onclick="closeNewProjectModal()">Отмена</button>
+                <button class="btn-purple" onclick="createNewProject()">Создать</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading" class="loading-overlay" style="display:none;"><div class="loading-spinner"></div></div>
+
+    <!-- Notifications -->
+    <div id="error" class="notification" style="display:none;">
+        <i class="fas fa-circle-exclamation"></i>
+        <div><div>Ошибка</div><div id="errorMessage"></div></div>
+    </div>
+    <div id="successNotification" class="notification" style="display:none;">
+        <i class="fas fa-check-circle"></i>
+        <div><div>Успешно</div><div id="successMessage"></div></div>
+    </div>
+
+    <script type="module" src="analyzer.js"></script>
+</body>
+</html>

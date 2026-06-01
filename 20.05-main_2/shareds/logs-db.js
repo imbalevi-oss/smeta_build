@@ -1,0 +1,1342 @@
+// shareds/logs-db.js
+// База данных для логов, сессий и проектов (без КС-2)
+
+const db = require('./db');
+const { run, query, getOne, getLastInsertId, createTableIfNotExists, addColumnIfNotExists } = db;
+
+// Увеличенный таймаут для тяжёлых запросов
+const LONG_TIMEOUT_MS = 60000; // 60 секунд
+
+// ==================== ФУНКЦИИ ДЛЯ РАБОТЫ С МОСКОВСКИМ ВРЕМЕНЕМ ====================
+function getMoscowISOString() {
+    const date = new Date();
+    const moscowTime = new Date(date.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+    return moscowTime.toISOString();
+}
+
+// ==================== ИНИЦИАЛИЗАЦИЯ ====================
+async function initLogsDatabase() {
+    await addColumnIfNotExists('sessions', 'is_ks2', 'INT DEFAULT 0');
+    await createTableIfNotExists('sessions', `
+        CREATE TABLE sessions (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            session_id NVARCHAR(100) UNIQUE,
+            user_name NVARCHAR(255),
+            user_institution NVARCHAR(255),
+            user_ip NVARCHAR(50),
+            filename NVARCHAR(255),
+            estimate_name NVARCHAR(500),
+            is_revised INT DEFAULT 0,
+            total_codes INT,
+            found_codes INT,
+            not_found_codes INT,
+            exact_matches INT DEFAULT 0,
+            table_matches INT DEFAULT 0,
+            section_matches INT DEFAULT 0,
+            collection_matches INT DEFAULT 0,
+            chapter_matches INT DEFAULT 0,
+            relation_matches INT DEFAULT 0,
+            parent_matches INT DEFAULT 0,
+            sbornik_matches INT DEFAULT 0,
+            text_lines INT DEFAULT 0,
+            restoration_codes INT DEFAULT 0,
+            has_coefficient_count INT DEFAULT 0,
+            coefficient_matches INT DEFAULT 0,
+            coefficient_mismatches INT DEFAULT 0,
+            total_amount FLOAT,
+            status NVARCHAR(20),
+            created_at DATETIME2 DEFAULT DATEADD(hour, 3, GETUTCDATE()),
+            updated_at DATETIME2,
+            project_id INT NULL
+        )
+    `);
+
+    await createTableIfNotExists('code_details', `
+        CREATE TABLE code_details (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            session_id NVARCHAR(100),
+            position INT,
+            row_number INT,
+            position_number NVARCHAR(50),
+            code NVARCHAR(MAX),
+            extracted_code NVARCHAR(255),
+            status NVARCHAR(50),
+            match_type NVARCHAR(50),
+            matched_level NVARCHAR(50),
+            is_restoration INT DEFAULT 0,
+            is_text INT DEFAULT 0,
+            has_comment INT DEFAULT 0,
+            is_duplicate INT DEFAULT 0,
+            duplicate_count INT DEFAULT 0,
+            has_coefficient INT DEFAULT 0,
+            coefficient_type NVARCHAR(20) DEFAULT 'none',
+            coefficient_value FLOAT,
+            expected_coefficient FLOAT,
+            coefficient_match INT DEFAULT 0,
+            description NVARCHAR(MAX),
+            created_at DATETIME2 DEFAULT DATEADD(hour, 3, GETUTCDATE())
+        )
+    `);
+
+    await createTableIfNotExists('admin_actions', `
+        CREATE TABLE admin_actions (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            admin_name NVARCHAR(100),
+            action_type NVARCHAR(50),
+            target_type NVARCHAR(50),
+            target_id INT,
+            details NVARCHAR(MAX),
+            ip NVARCHAR(50),
+            created_at DATETIME2 DEFAULT DATEADD(hour, 3, GETUTCDATE())
+        )
+    `);
+
+    await createTableIfNotExists('api_logs', `
+        CREATE TABLE api_logs (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            method NVARCHAR(10),
+            endpoint NVARCHAR(255),
+            status_code INT,
+            duration_ms INT,
+            ip NVARCHAR(50),
+            user_agent NVARCHAR(255),
+            created_at DATETIME2 DEFAULT DATEADD(hour, 3, GETUTCDATE())
+        )
+    `);
+
+    await createTableIfNotExists('user_projects', `
+        CREATE TABLE user_projects (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            user_id INT NOT NULL,
+            project_name NVARCHAR(500) NOT NULL,
+            filename NVARCHAR(255),
+            estimate_name NVARCHAR(500),
+            status NVARCHAR(20) DEFAULT 'active',
+            current_session_id NVARCHAR(100),
+            created_at DATETIME2 DEFAULT DATEADD(hour, 3, GETUTCDATE()),
+            updated_at DATETIME2,
+            archived_at DATETIME2
+        )
+    `);
+    await createTableIfNotExists('ks2_items', `
+    CREATE TABLE ks2_items (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        session_id NVARCHAR(100) NOT NULL,
+        file_name NVARCHAR(255) NOT NULL,
+        ks2_file_index INT DEFAULT 1,
+        position INT NOT NULL,
+        ks2_position_number NVARCHAR(50),
+        estimate_position_number NVARCHAR(50),
+        code NVARCHAR(255),
+        name NVARCHAR(MAX),
+        unit NVARCHAR(50),
+        quantity FLOAT,
+        price FLOAT,
+        total FLOAT,
+        coefficient FLOAT,
+        coeff_main FLOAT,
+        coeff_winter FLOAT,
+        coeff_recalc FLOAT,
+        row_number INT,
+        created_at DATETIME2 DEFAULT DATEADD(hour, 3, GETUTCDATE()),
+        updated_at DATETIME2,
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+    )
+`);
+
+    // ==================== ДОБАВЛЕНИЕ НЕДОСТАЮЩИХ КОЛОНОК ====================
+    await addColumnIfNotExists('sessions', 'coefficient_matches', 'INT DEFAULT 0');
+    await addColumnIfNotExists('sessions', 'coefficient_mismatches', 'INT DEFAULT 0');
+    await addColumnIfNotExists('code_details', 'has_coefficient', 'INT DEFAULT 0');
+    await addColumnIfNotExists('code_details', 'coefficient_type', "NVARCHAR(20) DEFAULT 'none'");
+    await addColumnIfNotExists('code_details', 'coefficient_value', 'FLOAT');
+    await addColumnIfNotExists('code_details', 'expected_coefficient', 'FLOAT');
+    await addColumnIfNotExists('code_details', 'coefficient_match', 'INT DEFAULT 0');
+    await addColumnIfNotExists('sessions', 'project_id', 'INT NULL');
+    await addColumnIfNotExists('code_details', 'is_main_row', 'INT DEFAULT 1');
+    await addColumnIfNotExists('code_details', 'total_amount', 'FLOAT');
+    await addColumnIfNotExists('code_details', 'quantity', 'FLOAT');
+    await addColumnIfNotExists('code_details', 'unit', 'NVARCHAR(50)');
+    await addColumnIfNotExists('code_details', 'price', 'FLOAT');
+
+    // ==================== ИНДЕКСЫ ====================
+    try { await run(`CREATE INDEX idx_sessions_project_id ON sessions (project_id)`); } catch(e) {}
+    try { await run(`CREATE INDEX idx_sessions_user_name ON sessions (user_name)`); } catch(e) {}
+    try { await run(`CREATE INDEX idx_sessions_created_at ON sessions (created_at)`); } catch(e) {}
+    try { await run(`CREATE INDEX idx_user_projects_user_id ON user_projects (user_id)`); } catch(e) {}
+    try { await run(`CREATE INDEX idx_user_projects_status ON user_projects (status)`); } catch(e) {}
+    try { await run(`CREATE INDEX idx_code_details_session_id ON code_details (session_id)`); } catch(e) {}
+try { await run(`CREATE INDEX idx_ks2_items_session ON ks2_items(session_id)`); } catch(e) {}
+try { await run(`CREATE INDEX idx_ks2_items_file ON ks2_items(file_name)`); } catch(e) {}
+    console.log('✅ База данных логов инициализирована (MS SQL) с московским временем');
+}
+
+// ==================== СЕССИИ ====================
+async function createSession(sessionId, data) {
+    await run(`
+        INSERT INTO sessions (
+            session_id, user_name, user_institution, user_ip, filename, estimate_name,
+            is_revised, total_codes, found_codes, not_found_codes,
+            exact_matches, table_matches, section_matches, collection_matches,
+            chapter_matches, relation_matches, parent_matches, sbornik_matches,
+            text_lines, restoration_codes, has_coefficient_count,
+            coefficient_matches, coefficient_mismatches,
+            total_amount, status, project_id
+        ) VALUES (
+            @p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9,
+            @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17,
+            @p18, @p19, @p20, @p21, @p22, @p23, @p24, @p25
+        )
+    `, [
+        sessionId,
+        data.user?.fullname || null,
+        data.user?.institution || null,
+        data.ip,
+        data.filename,
+        data.estimateName,
+        data.isRevised ? 1 : 0,
+        data.totalCodes || 0,
+        data.foundCodes || 0,
+        data.notFoundCodes || 0,
+        data.exactMatches || 0,
+        data.tableMatches || 0,
+        data.sectionMatches || 0,
+        data.collectionMatches || 0,
+        data.chapterMatches || 0,
+        data.relationMatches || 0,
+        data.parentMatches || 0,
+        data.sbornikMatches || 0,
+        data.textLines || 0,
+        data.restorationCodes || 0,
+        data.hasCoefficientCount || 0,
+        data.coefficientMatches || 0,
+        data.coefficientMismatches || 0,
+        data.totalAmount,
+        data.status || 'completed',
+        data.project_id || null
+    ]);
+    return sessionId;
+}
+
+async function updateSessionStats(sessionId, data) {
+    const updates = [];
+    const params = [];
+    const fields = [
+        'total_codes', 'found_codes', 'not_found_codes',
+        'exact_matches', 'table_matches', 'section_matches', 'collection_matches',
+        'chapter_matches', 'relation_matches', 'parent_matches',
+        'text_lines', 'restoration_codes', 'has_coefficient_count',
+        'coefficient_matches', 'coefficient_mismatches', 'total_amount', 'status'
+    ];
+    for (const field of fields) {
+        if (data[field] !== undefined) {
+            updates.push(`${field} = @p${params.length}`);
+            params.push(data[field]);
+        }
+    }
+    if (updates.length === 0) return;
+    updates.push('updated_at = DATEADD(hour, 3, GETUTCDATE())');
+    params.push(sessionId);
+    await run(`UPDATE sessions SET ${updates.join(', ')} WHERE session_id = @p${params.length-1}`, params);
+}
+
+async function updateSessionStatus(sessionId, status, totalAmount = null) {
+    if (totalAmount !== null) {
+        await run(`UPDATE sessions SET status = @p0, total_amount = @p1, updated_at = DATEADD(hour, 3, GETUTCDATE()) WHERE session_id = @p2`, [status, totalAmount, sessionId]);
+    } else {
+        await run(`UPDATE sessions SET status = @p0, updated_at = DATEADD(hour, 3, GETUTCDATE()) WHERE session_id = @p1`, [status, sessionId]);
+    }
+}
+
+async function addCodeDetailsBatch(sessionId, codes) {
+    if (!codes.length) return;
+    
+    const BATCH_SIZE = 50;
+    const totalBatches = Math.ceil(codes.length / BATCH_SIZE);
+    
+    let mainRowCount = 0;
+    
+    for (let batch = 0; batch < totalBatches; batch++) {
+        const start = batch * BATCH_SIZE;
+        const end = Math.min(start + BATCH_SIZE, codes.length);
+        const batchCodes = codes.slice(start, end);
+        
+        const values = [];
+        const params = [];
+        let idx = 0;
+        
+        for (let i = 0; i < batchCodes.length; i++) {
+            const c = batchCodes[i];
+            
+            const hasPositionNumber = c.positionNumber && c.positionNumber !== '' && c.positionNumber !== 'null';
+            const hasExtractedCode = c.extractedCode && c.extractedCode !== '' && c.extractedCode !== 'null';
+            const isMainRow = (hasPositionNumber && hasExtractedCode && !c.isText) ? 1 : 0;
+            
+            if (isMainRow === 1) {
+                mainRowCount++;
+            }
+            
+            const row = `(@p${idx}, @p${idx+1}, @p${idx+2}, @p${idx+3}, @p${idx+4}, @p${idx+5}, @p${idx+6}, @p${idx+7}, @p${idx+8}, @p${idx+9}, @p${idx+10}, @p${idx+11}, @p${idx+12}, @p${idx+13}, @p${idx+14}, @p${idx+15}, @p${idx+16}, @p${idx+17}, @p${idx+18}, @p${idx+19}, @p${idx+20}, @p${idx+21}, @p${idx+22}, @p${idx+23})`;
+            values.push(row);
+            
+            let coeffMatchValue = 0;
+            if (c.coefficientMatch === true) coeffMatchValue = 1;
+            else if (c.coefficientMatch === false) coeffMatchValue = -1;
+            
+            const actualCoeff = c.actualCoefficient !== undefined ? c.actualCoefficient : null;
+            const expectedCoeff = c.expectedCoefficient !== undefined ? c.expectedCoefficient : null;
+            
+            params.push(
+                sessionId,
+                start + i + 1,
+                c.rowNumber || null,
+                c.positionNumber || null,
+                c.code || '',
+                c.extractedCode || '',
+                c.status || '',
+                c.matchType || 'none',
+                c.matchedLevel || 'none',
+                c.isRestoration ? 1 : 0,
+                c.isText ? 1 : 0,
+                c.hasComment ? 1 : 0,
+                c.isDuplicate ? 1 : 0,
+                c.duplicateCount || 0,
+                c.hasCoefficient ? 1 : 0,
+                c.coefficientType || 'none',
+                actualCoeff,
+                expectedCoeff,
+                coeffMatchValue,
+                c.description || null,
+                isMainRow,
+                c.totalAmount || c.total_amount || 0,
+                c.quantity || 0,
+                c.unit || ''
+            );
+            idx += 24;
+        }
+        
+        const sql = `INSERT INTO code_details (
+            session_id, position, row_number, position_number, code, extracted_code, 
+            status, match_type, matched_level, is_restoration, is_text, has_comment, 
+            is_duplicate, duplicate_count, has_coefficient, coefficient_type, 
+            coefficient_value, expected_coefficient, coefficient_match, description,
+            is_main_row, total_amount, quantity, unit
+        ) VALUES ${values.join(',')}`;
+        
+        await run(sql, params);
+    }
+    
+    console.log(`✅ Сохранено ${codes.length} записей для сессии ${sessionId} (${mainRowCount} основных позиций)`);
+}
+
+// ==================== ПРОЕКТЫ ====================
+async function createProject(userId, projectName, filename, estimateName, sessionId) {
+    await run(`
+        INSERT INTO user_projects (user_id, project_name, filename, estimate_name, current_session_id, created_at, updated_at)
+        VALUES (@p0, @p1, @p2, @p3, @p4, DATEADD(hour, 3, GETUTCDATE()), DATEADD(hour, 3, GETUTCDATE()))
+    `, [userId, projectName, filename, estimateName, sessionId]);
+    
+    const result = await getOne(`SELECT SCOPE_IDENTITY() as id`);
+    return result ? result.id : null;
+}
+
+async function getUserProjects(userId, status = null) {
+    let sql = `
+        SELECT 
+            p.*,
+            (SELECT COUNT(*) FROM sessions WHERE project_id = p.id) as session_count,
+            (SELECT ISNULL(SUM(total_codes), 0) FROM sessions WHERE project_id = p.id) as total_codes,
+            (SELECT ISNULL(SUM(found_codes), 0) FROM sessions WHERE project_id = p.id) as found_codes,
+            (SELECT ISNULL(SUM(not_found_codes), 0) FROM sessions WHERE project_id = p.id) as not_found_codes,
+            (SELECT ISNULL(SUM(coefficient_matches), 0) FROM sessions WHERE project_id = p.id) as coefficient_matches,
+            (SELECT ISNULL(SUM(coefficient_mismatches), 0) FROM sessions WHERE project_id = p.id) as coefficient_mismatches,
+            (SELECT MAX(updated_at) FROM sessions WHERE project_id = p.id) as last_analysis_date,
+            (SELECT ISNULL(SUM(CASE WHEN cd.status = N'Обратите внимание' OR cd.is_text = 1 THEN 1 ELSE 0 END), 0)
+             FROM code_details cd
+             WHERE cd.session_id IN (SELECT session_id FROM sessions WHERE project_id = p.id)) as warningCount,
+            (SELECT ISNULL(SUM(CASE WHEN cd.status = N'Нельзя применять' OR cd.is_restoration = 1 THEN 1 ELSE 0 END), 0)
+             FROM code_details cd
+             WHERE cd.session_id IN (SELECT session_id FROM sessions WHERE project_id = p.id)) as notAllowedCount
+        FROM user_projects p
+        WHERE p.user_id = @p0
+    `;
+    
+    const params = [userId];
+    
+    if (status) {
+        sql += ` AND p.status = @p1`;
+        params.push(status);
+    }
+    
+    sql += ` ORDER BY p.updated_at DESC`;
+    
+    const projects = await query(sql, params);
+    
+    return projects.map(p => ({
+        ...p,
+        stats: {
+            totalCodes: p.total_codes || 0,
+            foundCodes: p.found_codes || 0,
+            notFoundCodes: p.not_found_codes || 0,
+            coefficientMatches: p.coefficient_matches || 0,
+            coefficientMismatches: p.coefficient_mismatches || 0,
+            warningCount: p.warningCount || 0,
+            notAllowedCount: p.notAllowedCount || 0,
+            lastAnalysisDate: p.last_analysis_date
+        }
+    }));
+}
+
+async function getProjectById(projectId, userId) {
+    const project = await getOne(`SELECT * FROM user_projects WHERE id = @p0 AND user_id = @p1`, [projectId, userId]);
+    
+    if (!project) return null;
+    
+    let currentSession = null;
+    if (project.current_session_id) {
+        currentSession = await getSessionDetails(project.current_session_id);
+    }
+    
+    const stats = await getProjectStats(projectId);
+    
+    return {
+        ...project,
+        stats,
+        currentSession
+    };
+}
+
+async function archiveProject(projectId, userId) {
+    await run(`UPDATE user_projects SET status = 'archived', updated_at = DATEADD(hour, 3, GETUTCDATE()), archived_at = DATEADD(hour, 3, GETUTCDATE()) WHERE id = @p0 AND user_id = @p1`, [projectId, userId]);
+}
+
+async function restoreProject(projectId, userId) {
+    await run(`UPDATE user_projects SET status = 'active', updated_at = DATEADD(hour, 3, GETUTCDATE()), archived_at = NULL WHERE id = @p0 AND user_id = @p1`, [projectId, userId]);
+}
+
+async function updateProjectSession(projectId, userId, sessionId) {
+    await run(`UPDATE user_projects SET current_session_id = @p0, updated_at = DATEADD(hour, 3, GETUTCDATE()) WHERE id = @p1 AND user_id = @p2`, [sessionId, projectId, userId]);
+}
+
+async function deleteProject(projectId, userId) {
+    await run(`DELETE FROM user_projects WHERE id = @p0 AND user_id = @p1 AND status = 'archived'`, [projectId, userId]);
+}
+
+async function getProjectStats(projectId) {
+    const project = await getOne(`SELECT current_session_id FROM user_projects WHERE id = @p0`, [projectId]);
+    if (!project || !project.current_session_id) return null;
+    
+    const session = await getOne(`
+        SELECT 
+            total_codes, found_codes, not_found_codes,
+            coefficient_matches, coefficient_mismatches,
+            exact_matches, table_matches, section_matches,
+            collection_matches, chapter_matches, parent_matches,
+            text_lines, restoration_codes, updated_at
+        FROM sessions WHERE session_id = @p0
+    `, [project.current_session_id]);
+    
+    if (!session) return null;
+    
+    const problemCount = (session.not_found_codes || 0) + (session.restoration_codes || 0) + (session.coefficient_mismatches || 0);
+    
+    return {
+        totalCodes: session.total_codes || 0,
+        problemCount: problemCount,
+        coefficientMismatches: session.coefficient_mismatches || 0,
+        notFoundCodes: session.not_found_codes || 0,
+        restorationCodes: session.restoration_codes || 0,
+        lastAnalysisDate: session.updated_at || null
+    };
+}
+
+// ==================== АДМИНСКИЕ ФУНКЦИИ ПРОЕКТОВ ====================
+async function getAllProjectsAdmin() {
+    return await query(`
+        SELECT 
+            p.id,
+            p.project_name,
+            p.status,
+            p.created_at,
+            p.updated_at,
+            u.fullname as user_name,
+            u.institution as user_institution,
+            COUNT(DISTINCT s.id) as session_count,
+            ISNULL(SUM(s.total_codes), 0) as total_codes,
+            ISNULL(SUM(s.found_codes), 0) as found_codes,
+            ISNULL(SUM(s.not_found_codes), 0) as not_found_codes,
+            ISNULL(SUM(s.coefficient_matches), 0) as coefficient_matches,
+            ISNULL(SUM(s.coefficient_mismatches), 0) as coefficient_mismatches,
+            ISNULL(SUM(s.restoration_codes), 0) as restoration_codes,
+            ISNULL(SUM(s.text_lines), 0) as text_lines,
+            (
+                SELECT ISNULL(SUM(CASE WHEN cd.status = N'Обратите внимание' OR cd.is_text = 1 THEN 1 ELSE 0 END), 0)
+                FROM code_details cd
+                WHERE cd.session_id IN (SELECT session_id FROM sessions WHERE project_id = p.id)
+            ) as warning_count,
+            (
+                SELECT ISNULL(SUM(CASE WHEN cd.status = N'Нельзя применять' OR cd.is_restoration = 1 THEN 1 ELSE 0 END), 0)
+                FROM code_details cd
+                WHERE cd.session_id IN (SELECT session_id FROM sessions WHERE project_id = p.id)
+            ) as not_allowed_count,
+            (
+                SELECT MAX(s2.updated_at)
+                FROM sessions s2
+                WHERE s2.project_id = p.id
+            ) as last_analysis_date
+        FROM user_projects p
+        LEFT JOIN users u ON p.user_id = u.id
+        LEFT JOIN sessions s ON s.project_id = p.id
+        GROUP BY p.id, p.project_name, p.status, p.created_at, p.updated_at, u.fullname, u.institution
+        ORDER BY p.updated_at DESC
+    `);
+}
+
+async function getProjectSessions(projectId) {
+    return await query(`
+        SELECT 
+            s.*,
+            ISNULL(s.not_found_codes, 0) + ISNULL(s.restoration_codes, 0) + ISNULL(s.coefficient_mismatches, 0) as problem_count,
+            (
+                SELECT ISNULL(SUM(CASE WHEN cd.status = N'Обратите внимание' OR cd.is_text = 1 THEN 1 ELSE 0 END), 0)
+                FROM code_details cd
+                WHERE cd.session_id = s.session_id
+            ) as warning_count,
+            (
+                SELECT ISNULL(SUM(CASE WHEN cd.status = N'Нельзя применять' OR cd.is_restoration = 1 THEN 1 ELSE 0 END), 0)
+                FROM code_details cd
+                WHERE cd.session_id = s.session_id
+            ) as not_allowed_count
+        FROM sessions s
+        WHERE s.project_id = @p0
+        ORDER BY s.created_at DESC
+    `, [projectId]);
+}
+
+async function adminUpdateProjectStatus(projectId, status) {
+    await run(`UPDATE user_projects SET status = @p0, updated_at = DATEADD(hour, 3, GETUTCDATE()) WHERE id = @p1`, [status, projectId]);
+}
+
+async function adminDeleteProject(projectId) {
+    await run(`DELETE FROM sessions WHERE project_id = @p0`, [projectId]);
+    await run(`DELETE FROM user_projects WHERE id = @p0`, [projectId]);
+}
+
+// ==================== ЛОГИРОВАНИЕ ====================
+async function logAdminAction(adminName, actionType, targetType, targetId, details, ip) {
+    await run(`
+        INSERT INTO admin_actions (admin_name, action_type, target_type, target_id, details, ip)
+        VALUES (@p0, @p1, @p2, @p3, @p4, @p5)
+    `, [adminName, actionType, targetType, targetId, JSON.stringify(details), ip]);
+}
+
+async function logApiRequest(method, endpoint, statusCode, durationMs, ip, userAgent) {
+    await run(`
+        INSERT INTO api_logs (method, endpoint, status_code, duration_ms, ip, user_agent)
+        VALUES (@p0, @p1, @p2, @p3, @p4, @p5)
+    `, [method, endpoint, statusCode, durationMs, ip, userAgent]);
+}
+
+// ==================== СТАТИСТИКА ====================
+async function getSessionsStats(startDate, endDate) {
+    const stats = await getOne(`
+        SELECT 
+            COUNT(*) as total_sessions,
+            SUM(total_codes) as total_codes,
+            SUM(found_codes) as found_codes,
+            SUM(not_found_codes) as not_found_codes,
+            SUM(exact_matches) as exact_matches,
+            SUM(table_matches) as table_matches,
+            SUM(section_matches) as section_matches,
+            SUM(collection_matches) as collection_matches,
+            SUM(chapter_matches) as chapter_matches,
+            SUM(relation_matches) as relation_matches,
+            SUM(parent_matches) as parent_matches,
+            SUM(text_lines) as text_lines,
+            SUM(restoration_codes) as restoration_codes,
+            SUM(has_coefficient_count) as has_coefficient_count,
+            SUM(coefficient_matches) as coefficient_matches,
+            SUM(coefficient_mismatches) as coefficient_mismatches,
+            AVG(CASE WHEN total_codes > 0 THEN (found_codes * 100.0 / total_codes) ELSE 0 END) as avg_accuracy,
+            SUM(CASE WHEN is_revised = 1 THEN 1 ELSE 0 END) as revised_count,
+            SUM(CASE WHEN is_revised = 0 THEN 1 ELSE 0 END) as new_count,
+            SUM(total_amount) as total_amount
+        FROM sessions
+        WHERE created_at BETWEEN @p0 AND @p1
+    `, [startDate, endDate]);
+    return stats || {};
+}
+
+async function getDailyStats(days = 30) {
+    return await query(`
+        SELECT 
+            CAST(created_at AS DATE) as date,
+            COUNT(*) as sessions,
+            SUM(total_codes) as codes,
+            SUM(found_codes) as found,
+            AVG(CASE WHEN total_codes > 0 THEN (found_codes * 100.0 / total_codes) ELSE 0 END) as accuracy,
+            SUM(coefficient_matches) as coeff_matches,
+            SUM(coefficient_mismatches) as coeff_mismatches
+        FROM sessions
+        WHERE created_at >= DATEADD(day, -@p0, DATEADD(hour, 3, GETUTCDATE()))
+        GROUP BY CAST(created_at AS DATE)
+        ORDER BY date DESC
+    `, [days]);
+}
+
+async function getTopUsers(limit = 10) {
+    return await query(`
+        SELECT TOP (@p0)
+            user_name,
+            user_institution,
+            COUNT(*) as sessions_count,
+            SUM(total_codes) as total_codes,
+            SUM(found_codes) as found_codes,
+            SUM(coefficient_matches) as coeff_matches,
+            SUM(coefficient_mismatches) as coeff_mismatches,
+            AVG(CASE WHEN total_codes > 0 THEN (found_codes * 100.0 / total_codes) ELSE 0 END) as avg_accuracy
+        FROM sessions
+        WHERE user_name IS NOT NULL AND user_name != ''
+        GROUP BY user_name, user_institution
+        ORDER BY sessions_count DESC
+    `, [limit]);
+}
+
+async function getTopEstimates(limit = 10) {
+    return await query(`
+        SELECT TOP (@p0)
+            estimate_name,
+            COUNT(*) as count,
+            AVG(CASE WHEN total_codes > 0 THEN (found_codes * 100.0 / total_codes) ELSE 0 END) as avg_accuracy,
+            SUM(total_amount) as total_amount,
+            SUM(total_codes) as total_codes,
+            SUM(found_codes) as found_codes,
+            SUM(coefficient_matches) as coeff_matches,
+            SUM(coefficient_mismatches) as coeff_mismatches
+        FROM sessions
+        WHERE estimate_name IS NOT NULL AND estimate_name != ''
+        GROUP BY estimate_name
+        ORDER BY count DESC
+    `, [limit]);
+}
+/**
+ * Сохранение КС-2 позиций в БД
+ */
+async function saveKs2Items(sessionId, fileName, fileIndex, items) {
+    if (!items || items.length === 0) return 0;
+    
+    const BATCH_SIZE = 100; // Уменьшим размер для отладки
+    let savedCount = 0;
+    
+    for (let batchStart = 0; batchStart < items.length; batchStart += BATCH_SIZE) {
+        const batch = items.slice(batchStart, batchStart + BATCH_SIZE);
+        
+        // Строим запрос с правильным количеством параметров
+        const placeholders = [];
+        const params = [];
+        let paramIndex = 0;
+        
+        for (let i = 0; i < batch.length; i++) {
+            const item = batch[i];
+            // Каждый элемент требует 18 параметров
+            const paramStart = paramIndex;
+            const placeholder = `(@p${paramStart}, @p${paramStart+1}, @p${paramStart+2}, @p${paramStart+3}, @p${paramStart+4}, @p${paramStart+5}, @p${paramStart+6}, @p${paramStart+7}, @p${paramStart+8}, @p${paramStart+9}, @p${paramStart+10}, @p${paramStart+11}, @p${paramStart+12}, @p${paramStart+13}, @p${paramStart+14}, @p${paramStart+15}, @p${paramStart+16}, @p${paramStart+17})`;
+            placeholders.push(placeholder);
+            
+            // Добавляем параметры для текущего элемента
+            params.push(
+                sessionId,
+                fileName,
+                fileIndex,
+                item.position || 0,
+                item.ks2_position_number || null,
+                item.estimate_position_number || null,
+                item.code || null,
+                item.name || null,
+                item.unit || null,
+                item.quantity || 0,
+                item.price || 0,
+                item.total || 0,
+                item.coefficient || null,
+                item.coeff_main || null,
+                item.coeff_winter || null,
+                item.coeff_recalc || null,
+                item.row_number || null
+            );
+            paramIndex += 18;
+        }
+        
+        const sql = `
+            INSERT INTO ks2_items (
+                session_id, file_name, ks2_file_index,
+                position, ks2_position_number, estimate_position_number,
+                code, name, unit, quantity, price, total,
+                coefficient, coeff_main, coeff_winter, coeff_recalc,
+                row_number, created_at, updated_at
+            ) VALUES ${placeholders.join(',')}
+        `;
+        
+        console.log(`📝 Сохранение батча из ${batch.length} позиций, параметров: ${params.length}`);
+        
+        try {
+            const result = await run(sql, params);
+            savedCount += (result.changes || batch.length);
+            console.log(`   ✅ Сохранено ${result.changes || batch.length} записей`);
+        } catch (err) {
+            console.error(`   ❌ Ошибка сохранения батча:`, err.message);
+            // Пробуем сохранять по одной позиции при ошибке
+            for (let i = 0; i < batch.length; i++) {
+                try {
+                    const singleResult = await run(`
+                        INSERT INTO ks2_items (
+                            session_id, file_name, ks2_file_index,
+                            position, ks2_position_number, estimate_position_number,
+                            code, name, unit, quantity, price, total,
+                            coefficient, coeff_main, coeff_winter, coeff_recalc,
+                            row_number, created_at, updated_at
+                        ) VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16, DATEADD(hour, 3, GETUTCDATE()), DATEADD(hour, 3, GETUTCDATE()))
+                    `, [
+                        sessionId, fileName, fileIndex,
+                        batch[i].position || 0,
+                        batch[i].ks2_position_number || null,
+                        batch[i].estimate_position_number || null,
+                        batch[i].code || null,
+                        batch[i].name || null,
+                        batch[i].unit || null,
+                        batch[i].quantity || 0,
+                        batch[i].price || 0,
+                        batch[i].total || 0,
+                        batch[i].coefficient || null,
+                        batch[i].coeff_main || null,
+                        batch[i].coeff_winter || null,
+                        batch[i].coeff_recalc || null,
+                        batch[i].row_number || null
+                    ]);
+                    savedCount++;
+                } catch (singleErr) {
+                    console.error(`      ❌ Не удалось сохранить позицию ${batch[i].position}:`, singleErr.message);
+                }
+            }
+        }
+    }
+    
+    console.log(`✅ Итого сохранено ${savedCount} позиций КС-2 для сессии ${sessionId}`);
+    return savedCount;
+}
+async function getMatchTypeDistribution(startDate, endDate) {
+    const stats = await getOne(`
+        SELECT 
+            SUM(exact_matches) as exact,
+            SUM(table_matches) as table_match,
+            SUM(section_matches) as section,
+            SUM(collection_matches) as collection,
+            SUM(chapter_matches) as chapter,
+            SUM(relation_matches) as relation,
+            SUM(parent_matches) as parent,
+            SUM(text_lines) as text,
+            SUM(restoration_codes) as restoration
+        FROM sessions
+        WHERE created_at BETWEEN @p0 AND @p1
+    `, [startDate, endDate]);
+    return stats || {};
+}
+
+async function getCoefficientStats(startDate, endDate) {
+    const stats = await getOne(`
+        SELECT 
+            SUM(coefficient_matches) as matches,
+            SUM(coefficient_mismatches) as mismatches,
+            CASE WHEN SUM(coefficient_matches + coefficient_mismatches) > 0 
+                 THEN ROUND(SUM(coefficient_matches) * 100.0 / SUM(coefficient_matches + coefficient_mismatches), 1)
+                 ELSE 0 END as match_percentage
+        FROM sessions
+        WHERE created_at BETWEEN @p0 AND @p1
+    `, [startDate, endDate]);
+    return stats || { matches: 0, mismatches: 0, match_percentage: 0 };
+}
+
+async function getSessionsHistory(limit = 50, offset = 0) {
+    return await query(`
+        SELECT * FROM sessions
+        ORDER BY created_at DESC
+        OFFSET @p0 ROWS FETCH NEXT @p1 ROWS ONLY
+    `, [offset, limit]);
+}
+
+async function getSessionDetails(sessionId) {
+    const session = await getOne(`SELECT * FROM sessions WHERE session_id = @p0`, [sessionId]);
+    if (!session) return null;
+    
+    const codes = await query(`
+        SELECT 
+            id, session_id, position, row_number, position_number, code, extracted_code,
+            status, match_type, matched_level, is_restoration, is_text, has_comment,
+            is_duplicate, duplicate_count, has_coefficient, coefficient_type,
+            coefficient_value, expected_coefficient, coefficient_match, description,
+            created_at, is_main_row, total_amount, quantity, unit
+        FROM code_details 
+        WHERE session_id = @p0 
+        ORDER BY position
+    `, [sessionId], { timeout: LONG_TIMEOUT_MS });
+    
+    const transformedCodes = codes.map(c => {
+        let coeffMatch = null;
+        if (c.coefficient_match === 1) coeffMatch = true;
+        else if (c.coefficient_match === -1) coeffMatch = false;
+        
+        return {
+            ...c,
+            positionNumber: c.position_number,
+            rowNumber: c.row_number,
+            extractedCode: c.extracted_code,
+            matchType: c.match_type,
+            matchedLevel: c.matched_level,
+            isRestoration: c.is_restoration === 1,
+            isText: c.is_text === 1,
+            hasComment: c.has_comment === 1,
+            isDuplicate: c.is_duplicate === 1,
+            duplicateCount: c.duplicate_count,
+            hasCoefficient: c.has_coefficient === 1,
+            coefficientType: c.coefficient_type,
+            actualCoefficient: c.coefficient_value,
+            expectedCoefficient: c.expected_coefficient,
+            coefficientMatch: coeffMatch,
+            actual_coefficient: c.coefficient_value,
+            expected_coefficient: c.expected_coefficient,
+            coefficient_match: c.coefficient_match,
+            is_main_row: c.is_main_row,
+            total_amount: c.total_amount,
+            quantity: c.quantity,
+            unit: c.unit
+        };
+    });
+    
+    return { ...session, codes: transformedCodes };
+}
+
+async function getHourlyStats(startDate, endDate) {
+    const rows = await query(`
+        SELECT DATEPART(hour, created_at) as hour, COUNT(*) as count
+        FROM sessions
+        WHERE created_at BETWEEN @p0 AND @p1
+        GROUP BY DATEPART(hour, created_at)
+        ORDER BY hour
+    `, [startDate, endDate]);
+    const hourlyStats = [];
+    for (let hour = 0; hour < 24; hour++) {
+        const row = rows.find(r => r.hour === hour);
+        hourlyStats.push({ hour, count: row ? row.count : 0 });
+    }
+    return hourlyStats;
+}
+
+async function getFileTypeStats(startDate, endDate) {
+    const newFiles = await getOne(`SELECT COUNT(*) as count FROM sessions WHERE created_at BETWEEN @p0 AND @p1 AND is_revised = 0`, [startDate, endDate]);
+    const revisedFiles = await getOne(`SELECT COUNT(*) as count FROM sessions WHERE created_at BETWEEN @p0 AND @p1 AND is_revised = 1`, [startDate, endDate]);
+    return { new: newFiles?.count || 0, revised: revisedFiles?.count || 0 };
+}
+
+async function getCodeStatusStats(startDate, endDate) {
+    const sessions = await query(`SELECT session_id FROM sessions WHERE created_at BETWEEN @p0 AND @p1`, [startDate, endDate]);
+    const sessionIds = sessions.map(s => s.session_id);
+    if (sessionIds.length === 0) {
+        return { available: 0, warning: 0, notAllowed: 0, notFound: 0 };
+    }
+    const placeholders = sessionIds.map((_, i) => `@p${i}`).join(',');
+    const available = await getOne(`SELECT COUNT(*) as count FROM code_details WHERE session_id IN (${placeholders}) AND status = 'Доступен'`, sessionIds);
+    const warning = await getOne(`SELECT COUNT(*) as count FROM code_details WHERE session_id IN (${placeholders}) AND status = 'Обратите внимание'`, sessionIds);
+    const notAllowed = await getOne(`SELECT COUNT(*) as count FROM code_details WHERE session_id IN (${placeholders}) AND status = 'Нельзя применять'`, sessionIds);
+    const notFound = await getOne(`SELECT COUNT(*) as count FROM code_details WHERE session_id IN (${placeholders}) AND status = 'НЕ НАЙДЕН'`, sessionIds);
+    return {
+        available: available?.count || 0,
+        warning: warning?.count || 0,
+        notAllowed: notAllowed?.count || 0,
+        notFound: notFound?.count || 0
+    };
+}
+
+async function getUniqueUsersCount(startDate, endDate) {
+    const result = await getOne(`
+        SELECT COUNT(DISTINCT user_name) as count 
+        FROM sessions 
+        WHERE created_at BETWEEN @p0 AND @p1 
+          AND user_name IS NOT NULL AND user_name != ''
+    `, [startDate, endDate]);
+    return result?.count || 0;
+}
+
+async function getDashboardStats(days = 30) {
+    const now = new Date();
+    const moscowNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+    const startDate = new Date(moscowNow - days * 24 * 60 * 60 * 1000).toISOString();
+    const endDate = moscowNow.toISOString();
+    const prevStartDate = new Date(moscowNow - days * 2 * 24 * 60 * 60 * 1000).toISOString();
+    const prevEndDate = new Date(moscowNow - days * 24 * 60 * 60 * 1000).toISOString();
+
+    const [overview, dailyStats, hourlyStats, fileTypeStats, statusStats, matchTypeStats, coefficientStats, topUsers, topEstimates, uniqueUsers, sessions, prevOverview] = await Promise.all([
+        getSessionsStats(startDate, endDate),
+        getDailyStats(days),
+        getHourlyStats(startDate, endDate),
+        getFileTypeStats(startDate, endDate),
+        getCodeStatusStats(startDate, endDate),
+        getMatchTypeDistribution(startDate, endDate),
+        getCoefficientStats(startDate, endDate),
+        getTopUsers(10),
+        getTopEstimates(10),
+        getUniqueUsersCount(startDate, endDate),
+        getSessionsHistory(50, 0),
+        getSessionsStats(prevStartDate, prevEndDate)
+    ]);
+
+    const trends = {
+        sessions: prevOverview.total_sessions ? ((overview.total_sessions - prevOverview.total_sessions) / prevOverview.total_sessions * 100).toFixed(1) : 0,
+        accuracy: prevOverview.avg_accuracy ? (overview.avg_accuracy - prevOverview.avg_accuracy).toFixed(1) : 0,
+        coefficientMatchRate: coefficientStats.match_percentage || 0
+    };
+
+    return {
+        overview,
+        dailyStats,
+        hourlyStats,
+        fileTypeStats,
+        statusStats,
+        matchTypeStats,
+        coefficientStats,
+        topUsers,
+        topEstimates,
+        uniqueUsers,
+        sessions,
+        trends
+    };
+}
+
+async function getUsersAnalytics(days = 30, projectId = null) {
+    const params = [];
+    let dateFilter = `s.created_at >= DATEADD(day, -@p0, DATEADD(hour, 3, GETUTCDATE()))`;
+    params.push(days);
+
+    let projectFilter = '';
+    if (projectId !== null) {
+        projectFilter = `AND s.project_id = @p${params.length}`;
+        params.push(projectId);
+    }
+
+    const sql = `
+        SELECT 
+            s.user_name,
+            s.user_institution,
+            MAX(s.created_at) AS last_activity,
+            COUNT(DISTINCT s.session_id) AS sessions_count,
+            COUNT(DISTINCT s.filename) AS files_count,
+            SUM(s.total_codes) AS total_codes,
+            SUM(s.found_codes) AS found_codes,
+            CASE WHEN SUM(s.total_codes) > 0 
+                 THEN ROUND(SUM(s.found_codes)*100.0/SUM(s.total_codes), 1) 
+                 ELSE 0 END AS accuracy,
+            SUM(s.coefficient_matches) AS coeff_matches,
+            SUM(s.coefficient_mismatches) AS coeff_mismatches,
+            SUM(s.exact_matches) AS exact_matches,
+            SUM(s.table_matches) AS table_matches,
+            SUM(s.section_matches) AS section_matches,
+            SUM(s.collection_matches) AS collection_matches,
+            SUM(s.chapter_matches) AS chapter_matches,
+            SUM(s.relation_matches) AS relation_matches,
+            SUM(s.parent_matches) AS parent_matches,
+            SUM(s.restoration_codes) AS restoration_codes,
+            SUM(s.text_lines) AS text_lines
+        FROM sessions s
+        WHERE ${dateFilter} ${projectFilter}
+          AND s.user_name IS NOT NULL AND s.user_name != ''
+        GROUP BY s.user_name, s.user_institution
+        ORDER BY last_activity DESC
+    `;
+
+    return await query(sql, params);
+}
+
+async function getUserSessions(userName, days = 30, projectId = null) {
+    const params = [userName];
+    let dateFilter = `s.created_at >= DATEADD(day, -@p1, DATEADD(hour, 3, GETUTCDATE()))`;
+    params.push(days);
+
+    let projectFilter = '';
+    if (projectId !== null) {
+        projectFilter = `AND s.project_id = @p${params.length}`;
+        params.push(projectId);
+    }
+
+    const sql = `
+        SELECT 
+            s.session_id,
+            s.filename,
+            s.estimate_name,
+            s.is_revised,
+            s.total_codes,
+            s.found_codes,
+            s.not_found_codes,
+            s.coefficient_matches,
+            s.coefficient_mismatches,
+            s.total_amount,
+            s.status,
+            s.created_at
+        FROM sessions s
+        WHERE s.user_name = @p0
+          AND ${dateFilter}
+          ${projectFilter}
+        ORDER BY s.created_at DESC
+    `;
+    return await query(sql, params);
+}
+
+async function getProjectProblemCodes(projectId) {
+    const sessions = await query(`SELECT session_id FROM sessions WHERE project_id = @p0`, [projectId]);
+    const sessionIds = sessions.map(s => s.session_id);
+    if (sessionIds.length === 0) return { notAllowed: [], warning: [] };
+
+    const placeholders = sessionIds.map((_, i) => `@p${i}`).join(',');
+
+    const notAllowed = await query(`
+        SELECT cd.code, cd.description, cd.status, cd.match_type, cd.position, s.filename, s.created_at
+        FROM code_details cd
+        JOIN sessions s ON cd.session_id = s.session_id
+        WHERE cd.session_id IN (${placeholders})
+          AND (cd.status = N'Нельзя применять' OR cd.is_restoration = 1)
+        ORDER BY s.created_at DESC, cd.position
+    `, sessionIds);
+
+    const warning = await query(`
+        SELECT cd.code, cd.description, cd.status, cd.match_type, cd.position, s.filename, s.created_at
+        FROM code_details cd
+        JOIN sessions s ON cd.session_id = s.session_id
+        WHERE cd.session_id IN (${placeholders})
+          AND (cd.status = N'Обратите внимание' OR cd.is_text = 1)
+        ORDER BY s.created_at DESC, cd.position
+    `, sessionIds);
+
+    return { notAllowed, warning };
+}
+
+async function getTopProblemCodes(days = 30, limit = 20) {
+    const dateFilter = `s.created_at >= DATEADD(day, -@p0, DATEADD(hour, 3, GETUTCDATE()))`;
+    const params = [days];
+    
+    const notAllowed = await query(`
+        SELECT TOP (@p1)
+            cd.code,
+            cd.description,
+            'Нельзя применять' as problem_type,
+            COUNT(*) as count
+        FROM code_details cd
+        JOIN sessions s ON cd.session_id = s.session_id
+        WHERE ${dateFilter}
+          AND (cd.status = N'Нельзя применять' OR cd.is_restoration = 1)
+        GROUP BY cd.code, cd.description
+        ORDER BY count DESC
+    `, [days, limit]);
+    
+    const warning = await query(`
+        SELECT TOP (@p1)
+            cd.code,
+            cd.description,
+            'Обратите внимание' as problem_type,
+            COUNT(*) as count
+        FROM code_details cd
+        JOIN sessions s ON cd.session_id = s.session_id
+        WHERE ${dateFilter}
+          AND (cd.status = N'Обратите внимание' OR cd.is_text = 1)
+        GROUP BY cd.code, cd.description
+        ORDER BY count DESC
+    `, [days, limit]);
+    
+    return {
+        notAllowed,
+        warning
+    };
+}
+
+async function getMatchTypeTrend(days = 30) {
+    const sql = `
+        SELECT 
+            CAST(created_at AS DATE) as date,
+            SUM(exact_matches) as exact,
+            SUM(table_matches) as table_match,
+            SUM(section_matches) as section,
+            SUM(collection_matches) as collection,
+            SUM(chapter_matches) as chapter,
+            SUM(relation_matches) as relation,
+            SUM(parent_matches) as parent,
+            SUM(text_lines) as text,
+            SUM(restoration_codes) as restoration
+        FROM sessions
+        WHERE created_at >= DATEADD(day, -@p0, DATEADD(hour, 3, GETUTCDATE()))
+        GROUP BY CAST(created_at AS DATE)
+        ORDER BY date
+    `;
+    return await query(sql, [days]);
+}
+
+async function getManagerDashboard(days = 30) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+    const startDate = todayStart.toISOString();
+    const endDate = todayEnd.toISOString();
+    
+    const todayStats = await getSessionsStats(startDate, endDate);
+    const topUsers = await getTopUsers(5);
+    const topProblems = await getTopProblemCodes(days, 10);
+    
+    return {
+        today: {
+            sessions: todayStats.total_sessions || 0,
+            accuracy: todayStats.avg_accuracy || 0,
+            totalAmount: todayStats.total_amount || 0,
+            codes: todayStats.total_codes || 0,
+            found: todayStats.found_codes || 0
+        },
+        topUsers: topUsers || [],
+        topProblems: topProblems || { notAllowed: [], warning: [] }
+    };
+}
+
+// ==================== ОЧИСТКА ЛОГОВ ====================
+async function clearLogsOlderThan(days) {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoffStr = cutoffDate.toISOString();
+
+    const sessionsResult = await run(`DELETE FROM sessions WHERE created_at < @p0`, [cutoffStr]);
+    const apiResult = await run(`DELETE FROM api_logs WHERE created_at < @p0`, [cutoffStr]);
+    const adminResult = await run(`DELETE FROM admin_actions WHERE created_at < @p0`, [cutoffStr]);
+    const detailsResult = await run(`DELETE FROM code_details WHERE session_id NOT IN (SELECT session_id FROM sessions)`);
+    return {
+        sessions: sessionsResult.changes,
+        apiLogs: apiResult.changes,
+        adminActions: adminResult.changes,
+        details: detailsResult.changes
+    };
+}
+
+async function clearAllLogs() {
+    await run(`DELETE FROM sessions`);
+    await run(`DELETE FROM code_details`);
+    await run(`DELETE FROM api_logs`);
+    await run(`DELETE FROM admin_actions`);
+    return true;
+}
+
+function isDatabaseExists() { return true; }
+// ==================== КС-2 МЕТОДЫ ====================
+
+/**
+ * Создание сессии для КС-2
+ */
+/**
+ * Создание сессии для КС-2
+ */
+async function createKs2Session(sessionId, data) {
+    // Убедимся, что колонка is_ks2 существует
+    await addColumnIfNotExists('sessions', 'is_ks2', 'INT DEFAULT 0');
+    
+    const result = await run(`
+        INSERT INTO sessions (
+            session_id, user_name, user_institution, user_ip, filename, estimate_name,
+            total_codes, total_amount, status, project_id, is_ks2, created_at, updated_at
+        ) VALUES (
+            @p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, 1, DATEADD(hour, 3, GETUTCDATE()), DATEADD(hour, 3, GETUTCDATE())
+        )
+    `, [
+        sessionId,
+        data.user?.fullname || null,
+        data.user?.institution || null,
+        data.ip || null,
+        data.filename,
+        data.estimateName || `КС-2: ${data.filename}`,
+        data.totalCodes || 0,
+        data.totalAmount || 0,
+        data.status || 'completed',
+        data.projectId || null
+    ]);
+    
+    console.log(`✅ Создана КС-2 сессия: ${sessionId}`);
+    return sessionId;
+}
+
+/**
+ * Сохранение КС-2 позиций в БД
+ */
+/**
+ * Сохранение КС-2 позиций в БД
+ */
+async function saveKs2Items(sessionId, fileName, fileIndex, items) {
+    if (!items || items.length === 0) return 0;
+    
+    let savedCount = 0;
+    
+    // Сохраняем по одной позиции, чтобы избежать проблем с параметрами
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        
+        try {
+            // Используем простой INSERT без плейсхолдеров с номерами
+            const result = await run(`
+                INSERT INTO ks2_items (
+                    session_id, file_name, ks2_file_index,
+                    position, ks2_position_number, estimate_position_number,
+                    code, name, unit, quantity, price, total,
+                    coefficient, coeff_main, coeff_winter, coeff_recalc,
+                    row_number, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATEADD(hour, 3, GETUTCDATE()), DATEADD(hour, 3, GETUTCDATE()))
+            `, [
+                sessionId,
+                fileName,
+                fileIndex,
+                item.position || 0,
+                item.ks2_position_number || null,
+                item.estimate_position_number || null,
+                item.code || null,
+                item.name || null,
+                item.unit || null,
+                item.quantity || 0,
+                item.price || 0,
+                item.total || 0,
+                item.coefficient || null,
+                item.coeff_main || null,
+                item.coeff_winter || null,
+                item.coeff_recalc || null,
+                item.row_number || null
+            ]);
+            
+            savedCount++;
+            
+            if ((i + 1) % 50 === 0) {
+                console.log(`   Сохранено ${savedCount}/${items.length} позиций...`);
+            }
+        } catch (err) {
+            console.error(`   ❌ Ошибка сохранения позиции ${item.position}:`, err.message);
+        }
+    }
+    
+    console.log(`✅ Сохранено ${savedCount} из ${items.length} позиций КС-2 для сессии ${sessionId}`);
+    return savedCount;
+}
+
+/**
+ * Получение КС-2 позиций по сессии
+ */
+async function getKs2Items(sessionId) {
+    return await query(`
+        SELECT 
+            id, session_id, file_name, ks2_file_index,
+            position, ks2_position_number, estimate_position_number,
+            code, name, unit, quantity, price, total,
+            coefficient, coeff_main, coeff_winter, coeff_recalc,
+            row_number, created_at
+        FROM ks2_items 
+        WHERE session_id = @p0
+        ORDER BY ks2_file_index, position
+    `, [sessionId], { timeout: 60000 });
+}
+
+/**
+ * Получение всех КС-2 сессий по проекту
+ */
+async function getProjectKs2Sessions(projectId) {
+    return await query(`
+        SELECT 
+            s.session_id,
+            s.filename,
+            s.estimate_name,
+            s.created_at,
+            s.total_codes as total_items,
+            s.total_amount,
+            s.status,
+            s.user_name,
+            COUNT(i.id) as items_count,
+            SUM(i.total) as calculated_amount,
+            SUM(i.quantity) as total_quantity
+        FROM sessions s
+        LEFT JOIN ks2_items i ON s.session_id = i.session_id
+        WHERE s.project_id = @p0 
+          AND s.is_ks2 = 1
+        GROUP BY 
+            s.session_id, s.filename, s.estimate_name, s.created_at, 
+            s.total_codes, s.total_amount, s.status, s.user_name
+        ORDER BY s.created_at DESC
+    `, [projectId]);
+}
+
+/**
+ * Получение сессии по ID (КС-2)
+ */
+async function getKs2SessionById(sessionId) {
+    const session = await getOne(`
+        SELECT * FROM sessions 
+        WHERE session_id = @p0 AND is_ks2 = 1
+    `, [sessionId]);
+    
+    if (!session) return null;
+    
+    const items = await getKs2Items(sessionId);
+    
+    return {
+        ...session,
+        items: items,
+        totalItems: items.length
+    };
+}
+
+/**
+ * Удаление КС-2 сессии
+ */
+async function deleteKs2Session(sessionId) {
+    await run(`DELETE FROM ks2_items WHERE session_id = @p0`, [sessionId]);
+    const result = await run(`DELETE FROM sessions WHERE session_id = @p0 AND is_ks2 = 1`, [sessionId]);
+    return result.changes > 0;
+}
+// ==================== ЭКСПОРТ ====================
+module.exports = {
+    initLogsDatabase,
+    createSession,
+    updateSessionStats,
+    updateSessionStatus,
+    addCodeDetailsBatch,
+    logAdminAction,
+    logApiRequest,
+    getSessionsStats,
+    getDailyStats,
+    getTopUsers,
+    getTopEstimates,
+    getMatchTypeDistribution,
+    getCoefficientStats,
+    getSessionsHistory,
+    getSessionDetails,
+    getHourlyStats,
+    getFileTypeStats,
+    getCodeStatusStats,
+    getUniqueUsersCount,
+    getDashboardStats,
+    getUsersAnalytics,
+    getUserSessions,
+    getProjectProblemCodes,
+    getTopProblemCodes,
+    getMatchTypeTrend,
+    getManagerDashboard,
+    isDatabaseExists,
+    clearLogsOlderThan,
+    clearAllLogs,
+    createProject,
+    getUserProjects,
+    getProjectById,
+    archiveProject,
+    restoreProject,
+    updateProjectSession,
+    deleteProject,
+    saveKs2Items,
+    getProjectStats,
+    getAllProjectsAdmin,
+    getProjectSessions,
+    adminUpdateProjectStatus,
+    adminDeleteProject
+};

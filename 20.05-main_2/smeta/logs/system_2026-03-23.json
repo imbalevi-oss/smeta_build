@@ -1,0 +1,15 @@
+[
+  {
+    "type": "system_event",
+    "timestamp": "2026-03-23T14:42:41.631Z",
+    "event": "Сервер запущен",
+    "details": {
+      "port": "\\\\.\\pipe\\1cf97d0f-f463-40c4-9c27-13c56909ca00",
+      "maxConcurrent": 5,
+      "nodeVersion": "v24.13.0",
+      "platform": "win32",
+      "workingDir": "C:\\inetpub\\smeta"
+    },
+    "message": "Системное событие: Сервер запущен"
+  }
+]
