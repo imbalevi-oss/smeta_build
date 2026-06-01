@@ -1,4 +1,5 @@
 // shareds/ks2-parser.js - С ПОДРОБНЫМИ КОНСОЛЬ ЛОГАМИ
+// СУММА ПОЗИЦИИ БЕРЁТСЯ ИЗ КОЛОНКИ K: СУММИРУЕМ ЗНАЧЕНИЯ В СТРОКЕ ШИФРА И ВО ВСЕХ СТРОКАХ-ДЕТАЛЯХ
 
 const XLSX = require('xlsx');
 const iconv = require('iconv-lite');
@@ -98,6 +99,7 @@ function fixFilename(filename) {
 
 /**
  * Основная функция парсинга КС-2
+ * Сумма позиции = сумма всех значений в колонке K для строки с шифром и всех её строк-деталей
  */
 function parseKS2(fileBuffer, fileName = '') {
     fileName = fixFilename(fileName);
@@ -153,7 +155,7 @@ function parseKS2(fileBuffer, fileName = '') {
         console.log(`   E (5): Ед.изм.`);
         console.log(`   F (6): Количество`);
         console.log(`   I (9): Коэффициент`);
-        console.log(`   K (11): Сумма`);
+        console.log(`   K (11): Сумма (ОСНОВНОЙ ИСТОЧНИК СУММЫ ПОЗИЦИИ)`);
         
         // ==================== СБОР ПОЗИЦИЙ ====================
         const positions = [];
@@ -163,7 +165,7 @@ function parseKS2(fileBuffer, fileName = '') {
         let skippedCount = 0;
         
         console.log(`\n${'─'.repeat(80)}`);
-        console.log(`🔍 НАЧАЛО СБОРА ПОЗИЦИЙ`);
+        console.log(`🔍 НАЧАЛО СБОРА ПОЗИЦИЙ (суммируем K по строке шифра + всем деталям)`);
         console.log(`${'─'.repeat(80)}`);
         
         while (i < data.length) {
@@ -204,8 +206,9 @@ function parseKS2(fileBuffer, fileName = '') {
             const unit = row[unitCol] ? String(row[unitCol]).trim() : '';
             const quantity = parseNumber(row[quantityCol]);
             const coefficient = parseCoefficient(row[coeffCol]);
-            let positionTotal = parseNumber(row[totalCol]);
+            let positionTotal = parseNumber(row[totalCol]); // сумма в строке шифра (колонка K)
             
+            // ===== ЛОГИРОВАНИЕ СУММЫ ИЗ КОЛОНКИ K =====
             console.log(`\n${'─'.repeat(80)}`);
             console.log(`📍 ПОЗИЦИЯ ${positionCounter}:`);
             console.log(`   Строка: ${i + 1}`);
@@ -216,11 +219,12 @@ function parseKS2(fileBuffer, fileName = '') {
             console.log(`   Ед.изм.: ${unit || '—'}`);
             console.log(`   Количество: ${quantity}`);
             console.log(`   Коэффициент (колонка I): ${coefficient || '—'}`);
-            console.log(`   Сумма в строке (колонка K): ${positionTotal.toLocaleString('ru-RU')} ₽`);
+            console.log(`   🔍 СУММА В СТРОКЕ ШИФРА (колонка K): исходное значение = "${row[totalCol]}", после parseNumber = ${positionTotal}`);
             
             // ==================== СБОР ДЕТАЛЕЙ ====================
             let details = [];
             let detailsTotal = 0;
+            let detailSumLog = [];
             let j = i + 1;
             let detailCount = 0;
             
@@ -233,7 +237,7 @@ function parseKS2(fileBuffer, fileName = '') {
                 const nextCode = extractCodeFromString(nextCodeCell);
                 
                 if (nextCode && nextCode !== code) {
-                    console.log(`   🔚 Конец деталей на строке ${j} (начало новой позиции: ${nextCode})`);
+                    console.log(`   🔚 Конец деталей на строке ${j+1} (начало новой позиции: ${nextCode})`);
                     break;
                 }
                 
@@ -244,47 +248,42 @@ function parseKS2(fileBuffer, fileName = '') {
                 // Проверяем, является ли строка детальной
                 if (isDetailRow(detailName)) {
                     detailCount++;
+                    // Сумма детали ТОЛЬКО из колонки K (не используем количество)
                     let detailTotal = parseNumber(nextRow[totalCol]);
                     
-                    if (detailTotal === 0) {
-                        const detailQuantity = parseNumber(nextRow[quantityCol]);
-                        if (detailQuantity !== 0) {
-                            detailTotal = detailQuantity;
-                        }
-                    }
+                    console.log(`      🔎 ДЕТАЛЬ ${detailCount}: тип="${detailName}", сырое значение totalCol="${nextRow[totalCol]}", parseNumber = ${detailTotal}`);
                     
                     detailsTotal += detailTotal;
+                    detailSumLog.push(`${detailName}=${detailTotal}`);
                     
                     details.push({
                         type: detailName,
                         amount: detailTotal,
-                        quantity: parseNumber(nextRow[quantityCol]),
+                        quantity: parseNumber(nextRow[quantityCol]), // сохраняем для информации
                         unit: nextRow[unitCol] ? String(nextRow[unitCol]).trim() : '',
                         rowNumber: j + 1
                     });
                     
-                    console.log(`      📄 Деталь ${detailCount}: "${detailName}" | Сумма: ${detailTotal.toLocaleString('ru-RU')} ₽ | Строка: ${j + 1}`);
+                    console.log(`      📄 Деталь ${detailCount}: "${detailName}" | Сумма из K: ${detailTotal.toLocaleString('ru-RU')} ₽ | Строка: ${j + 1}`);
                 }
                 
                 j++;
             }
             
-            // Итоговая сумма
-            let total = positionTotal;
-            if (total === 0 && detailsTotal > 0) {
-                total = detailsTotal;
-                console.log(`   💰 Сумма рассчитана из деталей: ${total.toLocaleString('ru-RU')} ₽`);
-            } else if (total > 0) {
-                console.log(`   💰 Сумма из строки: ${total.toLocaleString('ru-RU')} ₽`);
-            } else {
-                console.log(`   ⚠️ Сумма = 0 ₽ (возможно проблема с парсингом)`);
+            console.log(`   📊 СУММА ДЕТАЛЕЙ (detailsTotal) = ${detailsTotal}`);
+            if (detailSumLog.length) {
+                console.log(`      Расклад по деталям: ${detailSumLog.join(', ')}`);
             }
             
-            if (detailsTotal > 0) {
-                console.log(`   📊 Сумма деталей: ${detailsTotal.toLocaleString('ru-RU')} ₽`);
+            // ИТОГОВАЯ СУММА ПОЗИЦИИ = сумма из строки шифра + суммы из всех деталей
+            let total = positionTotal + detailsTotal;
+            console.log(`   💰 ИТОГОВАЯ СУММА ПОЗИЦИИ (K строки шифра + K деталей): ${positionTotal} + ${detailsTotal} = ${total} ₽`);
+            
+            if (positionTotal === 0 && detailsTotal === 0) {
+                console.log(`   ⚠️ Сумма = 0 ₽ (нет значений в колонке K ни в строке шифра, ни в деталях)`);
             }
             
-            // Вычисляем объём
+            // Вычисляем объём (для информации)
             let volume = '';
             if (quantity > 0 && unit) {
                 const unitMatch = unit.match(/(\d+(?:[.,]\d+)?)/);
@@ -306,6 +305,7 @@ function parseKS2(fileBuffer, fileName = '') {
             }
             
             totalAmount += total;
+            console.log(`   💰 НАКОПЛЕННАЯ ОБЩАЯ СУММА (totalAmount) после позиции ${positionCounter}: ${totalAmount}`);
             
             positions.push({
                 position: positionCounter++,
@@ -332,6 +332,8 @@ function parseKS2(fileBuffer, fileName = '') {
         console.log(`${'='.repeat(80)}`);
         console.log(`   ✅ Всего позиций: ${positions.length}`);
         console.log(`   💰 Общая сумма: ${totalAmount.toLocaleString('ru-RU')} ₽`);
+        const sumOfTotals = positions.reduce((sum, p) => sum + p.total, 0);
+        console.log(`   🔢 Контроль: totalAmount (${totalAmount}) = сумма totals всех позиций (${positions.map(p => p.total).join(' + ')} = ${sumOfTotals}) — ${totalAmount === sumOfTotals ? '✅ совпадает' : '❌ РАСХОЖДЕНИЕ!'}`);
         console.log(`   📊 С коэффициентом: ${positions.filter(p => p.coefficient).length}`);
         console.log(`   📦 С детализацией: ${positions.filter(p => p.details.length > 0).length}`);
         console.log(`   ⏭️ Пропущено строк: ${skippedCount}`);
@@ -345,7 +347,7 @@ function parseKS2(fileBuffer, fileName = '') {
                 console.log(`\n   ${pos.position}. ${pos.ks2_position_number} | ${pos.code}`);
                 console.log(`      Наименование: ${pos.name.substring(0, 70)}`);
                 console.log(`      Коэффициент: ${pos.coefficient || '—'}`);
-                console.log(`      Сумма: ${pos.total.toLocaleString('ru-RU')} ₽`);
+                console.log(`      Сумма (K строки шифра + K деталей): ${pos.total.toLocaleString('ru-RU')} ₽`);
                 if (pos.details.length > 0) {
                     console.log(`      Детали (${pos.details.length}):`);
                     for (const d of pos.details) {
