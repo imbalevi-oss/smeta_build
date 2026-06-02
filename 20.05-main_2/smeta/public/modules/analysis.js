@@ -76,47 +76,46 @@ function displayMrStats(positions, stats, totalMrAmount) {
 /**
  * Загрузка новой версии файла в проект и выполнение анализа (ТОЛЬКО СМЕТА)
  */
+/**
+ * Загрузка новой версии файла в проект и выполнение анализа (ТОЛЬКО СМЕТА)
+ * Результат: показываем только проблемные позиции (warning, notallowed, text),
+ * но детали (включая МР) остаются в объектах этих позиций и доступны для раскрытия.
+ */
 export async function uploadNewVersionToProject() {
     if (!AppState.currentProjectId) {
         showError('Сначала выберите проект');
         return;
     }
-    
     if (!AppState.currentFile) {
         showError('Выберите файл сметы');
         return;
     }
-    
     const ext = AppState.currentFile.name.split('.').pop().toLowerCase();
     if (!['xlsx', 'xls'].includes(ext)) {
         showError('Только Excel файлы (.xlsx, .xls)');
         return;
     }
-    
+
     const formData = new FormData();
     formData.append('file', AppState.currentFile);
     formData.append('projectId', AppState.currentProjectId);
     formData.append('isRevised', 'false');
-    
+
     const submitBtn = document.getElementById('analyzeEstimateBtn');
     const originalText = submitBtn?.innerHTML || 'Анализировать';
-    
     if (submitBtn) {
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Загрузка и анализ...';
     }
-    
     showLoading();
-    
+
     try {
         const response = await fetch('/api/detailed-analyze-unified', {
             method: 'POST',
-            headers: {
-                'X-User-Id': AppState.currentUser?.id || ''
-            },
+            headers: { 'X-User-Id': AppState.currentUser?.id || '' },
             body: formData
         });
-        
+
         if (!response.ok) {
             let errorMessage = `Ошибка сервера: ${response.status}`;
             try {
@@ -128,37 +127,48 @@ export async function uploadNewVersionToProject() {
             }
             throw new Error(errorMessage);
         }
-        
+
         const data = await response.json();
-        
         if (!data || typeof data !== 'object') {
             throw new Error('Некорректный ответ от сервера');
         }
-        
         if (!data.success) {
             throw new Error(data.error || 'Ошибка анализа');
         }
-        
+
         const positions = safeArray(data.positions);
         const stats = safeObject(data.stats);
         const totalMrAmount = safeNumber(data.totalMrAmount || data.totalAmount, 0);
         const sessionId = data.sessionId || null;
-        
+
+        // Сохраняем все позиции (с деталями) для возможного использования в отчётах
         updateState('detailedPositionsData', positions);
-        
-        if (sessionId) {
-            updateState('lastSessionId', sessionId);
-        }
-        
-        // СОХРАНЯЕМ ВСЕ ПОЗИЦИИ, А НЕ ТОЛЬКО ПРОБЛЕМНЫЕ
-        updateState('currentResults', positions);
-        
+        if (sessionId) updateState('lastSessionId', sessionId);
+
+        // Формируем список проблемных позиций:
+        // - warning (коэффициент завышен/занижен, не найден код, обратить внимание)
+        // - notallowed (реставрационные, запрещённые)
+        // - text (цена поставщика)
+        // НЕ добавляем позиции только на основании наличия МР
+        const problemPositions = positions.filter(pos => {
+            if (!pos) return false;
+            // Текстовая позиция – всегда в выдаче
+            if (pos.isTextPosition === true) return true;
+            // Проблемные категории
+            return pos.statusCategory === 'warning' ||
+                   pos.statusCategory === 'notallowed' ||
+                   pos.statusCategory === 'text';
+        });
+
+        updateState('currentResults', problemPositions);
+
+        // Отображаем статистику (сумма МР, количество строк и т.д.) на основе ВСЕХ позиций
         displayMrStats(positions, stats, totalMrAmount);
-        
-        const hasProblems = positions.filter(p => p && (p.statusCategory === 'warning' || p.statusCategory === 'notallowed' || p.isTextPosition)).length > 0;
+
+        const hasProblems = problemPositions.length > 0;
         const resultsEl = document.getElementById('results');
         const emptyEl = document.getElementById('emptyState');
-        
+
         if (hasProblems) {
             if (resultsEl) {
                 resultsEl.classList.remove('hidden');
@@ -168,6 +178,8 @@ export async function uploadNewVersionToProject() {
                 emptyEl.classList.add('hidden');
                 emptyEl.style.display = 'none';
             }
+            // Применяем текущий фильтр (по умолчанию 'all', который показывает все problemPositions)
+            filterAndDisplayResults();
         } else {
             if (resultsEl) {
                 resultsEl.classList.add('hidden');
@@ -187,32 +199,34 @@ export async function uploadNewVersionToProject() {
                 `;
             }
         }
-        
+
+        // Показываем кнопки отчётов и сброса
         const fullReportBtn = document.getElementById('fullReportBtn');
         const excelReportBtn = document.getElementById('excelReportBtn');
         const resetBtn = document.getElementById('resetBtn');
-        
         if (fullReportBtn) fullReportBtn.classList.remove('hidden');
         if (excelReportBtn) excelReportBtn.classList.remove('hidden');
         if (resetBtn) resetBtn.classList.remove('hidden');
-        
+
+        // Устанавливаем фильтр по умолчанию
         updateState('currentFilter', 'all');
         filterAndDisplayResults();
-        
-        await loadProjectHistory();
+
+        // Обновляем историю проектов
+        if (window.loadProjectHistory) await window.loadProjectHistory();
         updateState('projectsLoaded', false);
-        
+
         const warningCount = stats.warningCount || 0;
         const notAllowedCount = stats.notAllowedCount || 0;
-        const mrRows = stats.mrRows || 0;
+        const mrRows = stats.totalMrRows || 0;
         const positionsWithMr = stats.positionsWithMr || 0;
-        
+
         let successMessage = `Анализ завершён: ⚠️ ${warningCount}, ❌ ${notAllowedCount}`;
         if (mrRows > 0) {
             successMessage += `, 📦 МР: ${mrRows} строк (${positionsWithMr} позиций)`;
         }
         showSuccess(successMessage);
-        
+
     } catch (error) {
         console.error('❌ Ошибка анализа:', error);
         showError(error.message || 'Ошибка при выполнении анализа');
@@ -225,81 +239,106 @@ export async function uploadNewVersionToProject() {
     }
 }
 
-/**
- * Отображение результатов из сохранённой сессии
- */
 export function displayResultsFromSession(session) {
-    // ... (код без изменений, как ранее)
-    if (!session) {
-        console.warn('displayResultsFromSession: session is undefined');
-        showEmptyState();
+    if (!session || !session.codes || !session.codes.length) {
+        const tableBody = document.getElementById('tableBody');
+        if (tableBody) {
+            tableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 60px;">Нет данных для отображения</td></tr>';
+        }
         return;
     }
-    
-    const allCodes = safeArray(session.codes);
-    
-    if (allCodes.length === 0) {
-        showEmptyState();
-        return;
-    }
-    
-    const enrichedCodes = allCodes
-        .filter(code => code && typeof code === 'object')
-        .map(code => {
-            code.category = computeCategory(code);
-            return code;
-        });
-    
-    const problemCodes = enrichedCodes.filter(code => code.category !== 'ok');
-    
-    updateState('currentResults', problemCodes);
+
+    // Сохраняем в глобальное состояние
+    updateState('currentResults', session.codes);
     updateState('lastSessionId', session.session_id);
-    
-    displaySessionStats(session, problemCodes);
-    
-    const hasProblems = problemCodes.length > 0;
+
+    // Пересчитываем статусы строго по правилам клиентской фильтрации
+    const warningCount = session.codes.filter(c => c.category === 'warning').length;
+    const notAllowedCount = session.codes.filter(c => c.category === 'notallowed' || c.is_restoration).length;
+    const hasProblems = (warningCount + notAllowedCount) > 0;
+
+    // Формируем HTML статистики
+    let statsHtml = `
+        <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr);">
+            <div class="stat-item">
+                <div class="stat-header">
+                    <span class="stat-label">⚠️ Требуют внимания</span>
+                    <i class="fas fa-exclamation-triangle" style="color: #f59e0b;"></i>
+                </div>
+                <div class="stat-value" style="color: #f59e0b;">${warningCount}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-header">
+                    <span class="stat-label">❌ Нельзя применить</span>
+                    <i class="fas fa-ban" style="color: #ef4444;"></i>
+                </div>
+                <div class="stat-value" style="color: #ef4444;">${notAllowedCount}</div>
+            </div>
+        </div>
+    `;
+
+    // Итоговая сумма (если есть)
+    if (session.total_amount) {
+        statsHtml += `
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 20px; padding: 24px; text-align: center; margin-bottom: 24px;">
+                <div style="color: rgba(255,255,255,0.8); font-size: 13px; text-transform: uppercase; letter-spacing: 1px;">Итоговая сумма</div>
+                <div style="color: white; font-size: 36px; font-weight: 800;">${Number(session.total_amount).toLocaleString('ru-RU')} ₽</div>
+            </div>
+        `;
+    }
+
+    // Обновляем DOM
+    const statsEl = document.getElementById('stats');
     const resultsEl = document.getElementById('results');
-    const emptyEl = document.getElementById('emptyState');
-    
-    if (hasProblems) {
-        if (resultsEl) {
-            resultsEl.classList.remove('hidden');
-            resultsEl.style.display = 'block';
-        }
-        if (emptyEl) {
-            emptyEl.classList.add('hidden');
-            emptyEl.style.display = 'none';
-        }
-    } else {
+    const emptyStateEl = document.getElementById('emptyState');
+
+    if (statsEl) {
+        statsEl.innerHTML = statsHtml;
+        statsEl.classList.remove('hidden');
+        statsEl.style.display = 'block';
+    }
+
+    if (!hasProblems) {
         if (resultsEl) {
             resultsEl.classList.add('hidden');
             resultsEl.style.display = 'none';
         }
-        if (emptyEl) {
-            emptyEl.classList.remove('hidden');
-            emptyEl.style.display = 'block';
-            emptyEl.innerHTML = `
+        if (emptyStateEl) {
+            emptyStateEl.classList.remove('hidden');
+            emptyStateEl.style.display = 'block';
+            emptyStateEl.innerHTML = `
                 <div class="empty-icon">
-                    <i class="fas fa-check-circle" style="color:#10b981;font-size:48px;"></i>
+                    <i class="fas fa-check-circle" style="color: #10b981; font-size: 48px;"></i>
                 </div>
-                <h3 style="font-size:18px;font-weight:600;color:#4b5563;margin-bottom:8px;">
-                    ✅ Ошибок не найдено
-                </h3>
-                <p style="color:#9ca3af;">Все коды в порядке</p>
+                <h3 style="font-size: 18px; font-weight: 600; color: #059669; margin-bottom: 8px;">✅ Ошибок не найдено</h3>
+                <p style="color: #6b7280;">Все коды доступны для применения</p>
             `;
         }
+    } else {
+        if (resultsEl) {
+            resultsEl.classList.remove('hidden');
+            resultsEl.style.display = 'block';
+        }
+        if (emptyStateEl) {
+            emptyStateEl.classList.add('hidden');
+            emptyStateEl.style.display = 'none';
+        }
     }
-    
+
+    // Показываем кнопки действий
     const fullReportBtn = document.getElementById('fullReportBtn');
-    const excelReportBtn = document.getElementById('excelReportBtn');
     const resetBtn = document.getElementById('resetBtn');
-    
     if (fullReportBtn) fullReportBtn.classList.remove('hidden');
-    if (excelReportBtn) excelReportBtn.classList.remove('hidden');
     if (resetBtn) resetBtn.classList.remove('hidden');
-    
-    updateState('currentFilter', 'all');
+
+    // Устанавливаем фильтр «⚠️ Обратите внимание» и отображаем результаты
+    updateState('currentFilter', 'warning');
     filterAndDisplayResults();
+
+    // Активируем чип «warning»
+    document.querySelectorAll('.chip').forEach(chip => chip.classList.remove('active'));
+    const warningChip = document.querySelector('.chip[data-status="warning"]');
+    if (warningChip) warningChip.classList.add('active');
 }
 
 function displaySessionStats(session, problemCodes) {

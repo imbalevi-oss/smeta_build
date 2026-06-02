@@ -1,5 +1,5 @@
 // modules/results-renderer.js
-// Рендеринг результатов анализа (с поддержкой МР, объёмов и выпадающих блоков)
+// Рендеринг результатов анализа (с поддержкой всех деталей, группировка по типам)
 
 import { AppState, updateState } from './state.js';
 import { safeArray, safeNumber, escapeHtml, formatNumber, getProblemReason, safeString } from '../utils/helpers.js';
@@ -206,29 +206,114 @@ function showCoefficientPopup(event, actual, expected, code, position) {
     setTimeout(() => document.addEventListener('click', clickOutsideHandler), 100);
 }
 
+// Группировка деталей по типам (ЗП, ЭМ, МР, НР, СП, ЗТР, Прочие)
+function groupDetailsByType(details) {
+    const groups = {
+        'ЗП': { amount: 0, items: [], icon: 'fa-user-hard-hat', color: '#2563eb' },
+        'ЭМ': { amount: 0, items: [], icon: 'fa-industry', color: '#d97706' },
+        'МР': { amount: 0, items: [], icon: 'fa-cubes', color: '#059669' },
+        'НР': { amount: 0, items: [], icon: 'fa-percent', color: '#db2777' },
+        'СП': { amount: 0, items: [], icon: 'fa-chart-simple', color: '#7c3aed' },
+        'ЗТР': { amount: 0, items: [], icon: 'fa-clock', color: '#4b5563' },
+        'Прочие': { amount: 0, items: [], icon: 'fa-gear', color: '#6b7280' }
+    };
+
+    for (const detail of details) {
+        const typeRaw = (detail.type || '').toUpperCase();
+        let groupKey = 'Прочие';
+        if (typeRaw === 'ЗП' || typeRaw.startsWith('ЗП ') || typeRaw.includes('ЗАРАБОТНАЯ ПЛАТА')) groupKey = 'ЗП';
+        else if (typeRaw === 'ЭМ' || typeRaw.startsWith('ЭМ ') || typeRaw.includes('ЭКСПЛУАТАЦИЯ МАШИН')) groupKey = 'ЭМ';
+        else if (typeRaw === 'МР' || typeRaw.startsWith('МР ') || typeRaw.includes('МАТЕРИАЛЬНЫЕ РЕСУРСЫ') || typeRaw.includes('МАТЕРИАЛ')) groupKey = 'МР';
+        else if (typeRaw === 'НР' || typeRaw.startsWith('НР ') || typeRaw.includes('НАКЛАДНЫЕ РАСХОДЫ')) groupKey = 'НР';
+        else if (typeRaw === 'СП' || typeRaw.startsWith('СП ') || typeRaw.includes('СМЕТНАЯ ПРИБЫЛЬ')) groupKey = 'СП';
+        else if (typeRaw === 'ЗТР' || typeRaw.startsWith('ЗТР ') || typeRaw.includes('ЗАТРАТЫ ТРУДА')) groupKey = 'ЗТР';
+
+        groups[groupKey].amount += (detail.amount || 0);
+        groups[groupKey].items.push(detail);
+    }
+
+    return groups;
+}
+
+// Рендеринг блока деталей для позиции
+function renderDetailsBlock(details, totalAmount, idx) {
+    if (!details || details.length === 0) return '';
+    
+    const groups = groupDetailsByType(details);
+    let groupsHtml = '';
+    let allDetailsTotal = 0;
+    
+    for (const [groupName, groupData] of Object.entries(groups)) {
+        if (groupData.amount === 0) continue;
+        allDetailsTotal += groupData.amount;
+        groupsHtml += `
+            <div style="background: ${groupData.color}08; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; border-left: 3px solid ${groupData.color};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-weight: 600; color: ${groupData.color};">
+                        <i class="fas ${groupData.icon}" style="margin-right: 6px;"></i>
+                        ${groupName}
+                    </span>
+                    <span style="font-weight: 700; color: ${groupData.color};">
+                        ${groupData.amount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+                    </span>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: #4b5563;">
+                    ${groupData.items.map(d => {
+                        let detailText = d.type;
+                        if (d.quantity && d.unit) {
+                            detailText += ` (${d.quantity} ${d.unit})`;
+                        }
+                        return `<span>${escapeHtml(detailText)}: ${(d.amount || 0).toLocaleString('ru-RU')} ₽</span>`;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    return `
+        <tr id="details-row-${idx}" style="display:none; background:#f8fafc;">
+            <td colspan="6" style="padding:0;">
+                <div style="margin:8px 12px 12px 50px; background:#ffffff; border-radius:12px; overflow:hidden; border:1px solid #eef2f6;">
+                    <div style="background:#f1f5f9; padding:10px 16px; font-weight:600; font-size:13px; border-bottom:1px solid #e2e8f0;">
+                        <i class="fas fa-list-ul" style="margin-right:8px; color:#667eea;"></i> 
+                        Состав работ и затрат (ЗП, ЭМ, МР, НР, СП)
+                        <span style="float:right; color:#10b981;">
+                            Итого деталей: ${allDetailsTotal.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+                        </span>
+                    </div>
+                    <div style="padding: 12px;">
+                        ${groupsHtml}
+                    </div>
+                    <div style="background:#eef2ff; padding:8px 12px; border-top:1px solid #e2e8f0; text-align:right;">
+                        <span style="font-weight:600;">ВСЕГО ПОЗИЦИЯ:</span>
+                        <span style="font-weight:700; color:#667eea; margin-left:12px;">
+                            ${totalAmount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+                        </span>
+                    </div>
+                </div>
+             </td>
+         </tr>
+    `;
+}
+
 export function renderUnifiedTable(positions) {
     const tableBody = document.getElementById('tableBody');
     if (!tableBody) return;
     const safePositions = safeArray(positions);
     if (safePositions.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:60px;color:#9ca3af;">✅ Проблемные позиции не найдены</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:60px;color:#9ca3af;">✅ Проблемные позиции не найдены</td></tr>';
         return;
     }
-    
     let html = '';
     for (let idx = 0; idx < safePositions.length; idx++) {
         const pos = safePositions[idx];
         if (!pos) continue;
-        
         const totalCost = safeNumber(pos.totalAmount, 0);
         const positionNumber = pos.positionNumber || (idx + 1);
         const code = pos.code || '—';
         const name = safeString(pos.name || pos.description || '', '').substring(0, 100);
         const totalFormatted = totalCost.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-        // Объём (мелкое отображение под наименованием)
         const volumeDisplay = pos.formattedVolume || '';
-        console.log(`📦 [renderUnifiedTable] Позиция ${idx}: formattedVolume = "${volumeDisplay}"`);
         const volumeHtml = volumeDisplay ? `<div style="font-size:11px; color:#059669; margin-top:4px;"><i class="fas fa-calculator"></i> ${volumeDisplay}</div>` : '';
         
         let reason = getProblemReason(pos);
@@ -272,21 +357,19 @@ export function renderUnifiedTable(positions) {
         }
         
         const hasDetails = pos.details && pos.details.length > 0;
-        
-        // Основная строка
         html += `
             <tr class="position-row" data-idx="${idx}" data-position="${positionNumber}" data-code="${escapeHtml(code)}" style="cursor:pointer; border-bottom:1px solid #e2e8f0;">
                 <td style="padding:12px; vertical-align:middle; width:100px;">
                     ${hasDetails ? `<i class="fas fa-chevron-right toggle-icon" id="toggle-icon-${idx}" style="margin-right:6px; transition:transform 0.2s;"></i>` : '<span style="display:inline-block; width:20px;"></span>'}
                     <span class="position-badge">${escapeHtml(String(positionNumber))}</span>
-                </td>
+                 </td>
                 <td style="padding:12px; font-family:monospace; font-weight:500; vertical-align:middle; word-break:break-word;">
                     ${escapeHtml(code)}
-                </td>
+                 </td>
                 <td style="padding:12px; vertical-align:middle;">
                     <div style="font-weight:500; margin-bottom: 4px;">${escapeHtml(name)}</div>
                     ${volumeHtml}
-                </td>
+                 </td>
                 <td style="padding:12px; vertical-align:middle;">
                     <div>
                         <span style="display:inline-flex; align-items:center; gap:6px; background:${statusBg}; color:${statusColor}; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600;">
@@ -294,95 +377,17 @@ export function renderUnifiedTable(positions) {
                         </span>
                         ${coefficientHtml}
                     </div>
-                </td>
+                 </td>
                 <td style="padding:12px; vertical-align:middle; max-width:350px;">
                     <div style="font-size:12px; color:#4b5563; line-height:1.4;">${escapeHtml(reason.message)}</div>
-                </td>
+                 </td>
                 <td style="padding:12px; text-align:right; font-weight:700; white-space:nowrap;">
                     ${totalFormatted} ₽
-                </td>
-            </tr>
+                 </td>
+             </tr>
         `;
-        
-        // Блок деталей (все типы) – выпадающая строка
         if (hasDetails) {
-            // Группировка деталей
-            const groups = {
-                'ЗП': { amount: 0, items: [], color: '#2563eb', icon: 'fa-user-hard-hat', label: 'Заработная плата' },
-                'ЭМ': { amount: 0, items: [], color: '#d97706', icon: 'fa-industry', label: 'Эксплуатация машин' },
-                'МР': { amount: 0, items: [], color: '#059669', icon: 'fa-cubes', label: 'Материальные ресурсы' },
-                'НР': { amount: 0, items: [], color: '#db2777', icon: 'fa-percent', label: 'Накладные расходы' },
-                'СП': { amount: 0, items: [], color: '#7c3aed', icon: 'fa-chart-simple', label: 'Сметная прибыль' },
-                'ЗТР': { amount: 0, items: [], color: '#4b5563', icon: 'fa-clock', label: 'Затраты труда' },
-                'Прочие': { amount: 0, items: [], color: '#6b7280', icon: 'fa-gear', label: 'Прочие затраты' }
-            };
-            
-            for (const detail of pos.details) {
-                let type = detail.type ? detail.type.toUpperCase() : '';
-                let groupKey = 'Прочие';
-                if (type === 'ЗП' || type.startsWith('ЗП ')) groupKey = 'ЗП';
-                else if (type === 'ЭМ' || type.startsWith('ЭМ ')) groupKey = 'ЭМ';
-                else if (type === 'МР' || type.startsWith('МР ')) groupKey = 'МР';
-                else if (type === 'НР' || type.startsWith('НР ')) groupKey = 'НР';
-                else if (type === 'СП' || type.startsWith('СП ')) groupKey = 'СП';
-                else if (type === 'ЗТР' || type.startsWith('ЗТР ')) groupKey = 'ЗТР';
-                
-                groups[groupKey].amount += detail.amount;
-                groups[groupKey].items.push(detail);
-            }
-            
-            let groupsHtml = '';
-            for (const [groupKey, groupData] of Object.entries(groups)) {
-                if (groupData.amount === 0) continue;
-                groupsHtml += `
-                    <div style="background: ${groupData.color}08; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; border-left: 3px solid ${groupData.color};">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                            <span style="font-weight: 600; color: ${groupData.color};">
-                                <i class="fas ${groupData.icon}" style="margin-right: 6px;"></i>
-                                ${groupData.label}
-                            </span>
-                            <span style="font-weight: 700; color: ${groupData.color};">
-                                ${groupData.amount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
-                            </span>
-                        </div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: #4b5563;">
-                            ${groupData.items.map(d => {
-                                let detailInfo = `${d.type}: ${d.amount.toLocaleString('ru-RU')} ₽`;
-                                if (d.quantity) detailInfo += ` (кол-во: ${d.quantity})`;
-                                if (d.unit) detailInfo += ` ${d.unit}`;
-                                return `<span>${escapeHtml(detailInfo)}</span>`;
-                            }).join('')}
-                        </div>
-                    </div>
-                `;
-            }
-            
-            const detailsTotal = pos.details.reduce((sum, d) => sum + d.amount, 0);
-            html += `
-                <tr id="details-row-${idx}" style="display:none; background:#f8fafc;">
-                    <td colspan="7" style="padding:0;">
-                        <div style="margin:8px 12px 12px 60px; background:#ffffff; border-radius:12px; overflow:hidden; border:1px solid #eef2f6;">
-                            <div style="background:#f1f5f9; padding:10px 16px; font-weight:600; font-size:13px; border-bottom:1px solid #e2e8f0;">
-                                <i class="fas fa-list-ul" style="margin-right:8px; color:#667eea;"></i> 
-                                Состав работ и затрат (ЗП, ЭМ, МР, НР, СП)
-                                <span style="float:right; color:#10b981;">
-                                    Итого деталей: ${detailsTotal.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
-                                </span>
-                            </div>
-                            <div style="padding:12px;">
-                                ${groupsHtml}
-                            </div>
-                            <div style="background:#eef2ff; padding:8px 12px; border-top:1px solid #e2e8f0; text-align:right;">
-                                <span style="font-weight:600;">ВСЕГО ПОЗИЦИЯ:</span>
-                                <span style="font-weight:700; color:#667eea; margin-left:12px;">
-                                    ${totalFormatted} ₽
-                                </span>
-                            </div>
-                        </div>
-                       </td>
-                    </td>
-                </tr>
-            `;
+            html += renderDetailsBlock(pos.details, totalCost, idx);
         }
     }
     tableBody.innerHTML = html;
@@ -527,7 +532,6 @@ function showReasonsSummary(positions) {
     summaryContainer.classList.remove('hidden');
 }
 
-// Глобальная функция переключения деталей
 window.togglePositionDetails = function(idx) {
     const detailsRow = document.getElementById(`details-row-${idx}`);
     const icon = document.getElementById(`toggle-icon-${idx}`);
