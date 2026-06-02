@@ -110,22 +110,20 @@ export function getProblemReason(code) {
             severity: 'warning'
         };
     }
-    
-    const isRestoration = code.isRestoration === true || 
-                          code.isRestoration === 1 || 
-                          code.matchType === 'restoration' || 
-                          code.is_restoration === 1;
-    
+
+    // Реставрационные работы
+    const isRestoration = code.isRestoration === true || code.isRestoration === 1 || code.matchType === 'restoration' || code.is_restoration === 1;
     if (isRestoration) {
         return {
             type: 'restoration',
             icon: '❌',
-            title: 'Возможно применение только к ОКН, Реставрационные работы',
+            title: 'Реставрационные работы',
             message: 'Код относится к реставрационным работам (отделы 51-59). Применение запрещено.',
             severity: 'error'
         };
     }
-    
+
+    // Запрещённый код
     if (code.status === 'Нельзя применять') {
         return {
             type: 'forbidden',
@@ -135,141 +133,81 @@ export function getProblemReason(code) {
             severity: 'error'
         };
     }
-    
-    const actualCoeff = parseFloat(code.actualCoefficient || code.actual_coefficient || code.coefficient_value || 1);
-    const expectedCoeff = parseFloat(code.expectedCoefficient || code.expected_coefficient || 1);
-    
-    if (actualCoeff > 1) {
-        if (code.coefficientMatch === true && Math.abs(actualCoeff - expectedCoeff) <= 0.01) {
-            return {
-                type: 'info',
-                icon: 'ℹ️',
-                title: 'Информация',
-                message: `Коэффициент ${formatNumber(actualCoeff)} соответствует ожидаемому (${formatNumber(expectedCoeff)})`,
-                severity: 'info'
-            };
-        }
-        
-        let message = `Коэффициент завышен, требуется обоснование.`;
-        if (expectedCoeff !== 1 && expectedCoeff !== actualCoeff) {
-            message = `Коэффициент ${formatNumber(actualCoeff)} превышает допустимый (${formatNumber(expectedCoeff)}). Требуется обоснование.`;
-        }
-        
-        return {
-            type: 'coefficient_high',
-            icon: '📈',
-            title: 'Коэффициент завышен',
-            message: message,
-            severity: 'warning',
-            actualCoeff: actualCoeff,
-            expectedCoeff: expectedCoeff
-        };
-    }
-    
-    if (code.coefficientMatch === false && expectedCoeff > 1) {
-        if (actualCoeff < expectedCoeff) {
-            return {
-                type: 'coefficient_low',
-                icon: '📉',
-                title: 'Коэффициент занижен',
-                message: `Коэффициент ${formatNumber(actualCoeff)} ниже ожидаемого (${formatNumber(expectedCoeff)}). Проверьте правильность применения.`,
-                severity: 'warning',
-                actualCoeff: actualCoeff,
-                expectedCoeff: expectedCoeff
-            };
-        }
-        
-        return {
-            type: 'coefficient_mismatch',
-            icon: '⚠️',
-            title: 'Коэффициент не соответствует',
-            message: `Коэффициент ${formatNumber(actualCoeff)} не соответствует ожидаемому (${formatNumber(expectedCoeff)}).`,
-            severity: 'warning',
-            actualCoeff: actualCoeff,
-            expectedCoeff: expectedCoeff
-        };
-    }
-    
-    if (code.coefficientRequired === true && !code.hasCoefficient && expectedCoeff > 1) {
-        return {
-            type: 'coefficient_missing',
-            icon: '❓',
-            title: 'Коэффициент не указан',
-            message: `Для этого кода требуется проверка коэффициента, но он не указан в смете. Ожидается: ${formatNumber(expectedCoeff)}`,
-            severity: 'warning'
-        };
-    }
-    
+
+    // Текстовая строка
     if (code.isText === true || code.is_text === 1 || code.matchType === 'text') {
         return {
             type: 'text',
             icon: '📝',
             title: 'Цена поставщика',
-            message: 'Текстовая строка. Рекомендуется проверить цену в других источниках.',
+            message: code.description || 'Текстовая строка. Рекомендуется проверить цену.',
             severity: 'warning'
         };
     }
-    
+
+    // Код не найден
     if (code.found === false) {
-        if (actualCoeff < 1) {
-            return {
-                type: 'info',
-                icon: 'ℹ️',
-                title: 'Информация',
-                message: `Код не найден в базе, но коэффициент ${formatNumber(actualCoeff)} (понижающий, допустимо)`,
-                severity: 'info'
-            };
-        }
-        
-        if (actualCoeff === 1) {
-            return {
-                type: 'info',
-                icon: 'ℹ️',
-                title: 'Информация',
-                message: 'Код не найден в базе, но коэффициент в норме (1)',
-                severity: 'info'
-            };
-        }
-        
         return {
             type: 'not_found',
             icon: '🔍',
             title: 'Код не найден',
-            message: 'Данный код отсутствует в базе. Требуется ручная проверка.',
+            message: code.description || 'Данный код отсутствует в базе. Требуется ручная проверка.',
             severity: 'warning'
         };
     }
-    
-    if (code.status === 'Обратите внимание') {
-        if (code.description && code.description.includes('Понижающий коэффициент')) {
+
+    // Работа с коэффициентом
+    const actualCoeff = parseFloat(code.actualCoefficient || code.actual_coefficient || 1);
+    const expectedCoeff = parseFloat(code.expectedCoefficient || code.expected_coefficient || 1);
+    const isMatch = code.coefficientMatch === true;
+
+    if (actualCoeff < 1) {
+        return {
+            type: 'info',
+            icon: 'ℹ️',
+            title: 'Понижающий коэффициент',
+            message: `Коэффициент ${actualCoeff.toFixed(3)} (понижающий, допустимо)${expectedCoeff !== 1 ? `, ожидался ${expectedCoeff.toFixed(3)}` : ''}`,
+            severity: 'info'
+        };
+    }
+
+    if (code.coefficientMatch === false) {
+        if (actualCoeff > expectedCoeff) {
             return {
-                type: 'info',
+                type: 'coefficient_high',
+                icon: '⚠️',
+                title: 'Коэффициент завышен',
+                message: `Коэффициент ${actualCoeff.toFixed(3)} превышает допустимый (${expectedCoeff.toFixed(3)}). Требуется обоснование.`,
+                severity: 'warning'
+            };
+        } else if (actualCoeff < expectedCoeff) {
+            return {
+                type: 'coefficient_low',
                 icon: 'ℹ️',
-                title: 'Информация',
-                message: code.description,
+                title: 'Коэффициент занижен',
+                message: `Коэффициент ${actualCoeff.toFixed(3)} ниже ожидаемого (${expectedCoeff.toFixed(3)}), но допустимо.`,
                 severity: 'info'
             };
         }
-        
+        return {
+            type: 'coefficient_mismatch',
+            icon: '⚠️',
+            title: 'Коэффициент не соответствует',
+            message: code.description || `Коэффициент ${actualCoeff.toFixed(3)} не соответствует ожидаемому (${expectedCoeff.toFixed(3)}).`,
+            severity: 'warning'
+        };
+    }
+
+    if (code.status === 'Обратите внимание' && code.description && !code.description.includes('Понижающий')) {
         return {
             type: 'warning',
             icon: '⚠️',
             title: 'Требует внимания',
-            message: code.description || 'Проверьте корректность применения данного кода.',
+            message: code.description,
             severity: 'warning'
         };
     }
-    
-    if (code.description && code.description.includes('Понижающий коэффициент')) {
-        return {
-            type: 'info',
-            icon: 'ℹ️',
-            title: 'Информация',
-            message: code.description,
-            severity: 'info'
-        };
-    }
-    
+
     return {
         type: 'ok',
         icon: '✅',

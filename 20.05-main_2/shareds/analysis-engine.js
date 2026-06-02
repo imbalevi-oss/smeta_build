@@ -8,8 +8,8 @@ const iconv = require('iconv-lite');
 const codesDb = require('../../shareds/codes-db');
 const logsDb = require('../../shareds/logs-db');
 const usersDb = require('../../shareds/users-db');
-const { parseFullEstimate } = require('../../shareds/full-estimate-parser');
-
+const { parseFullEstimate } = require('../../shareds/estimate-parser');
+/*
 const { 
     PARSER_CONFIG, 
     findHeaderRows,
@@ -23,12 +23,12 @@ const {
     normalizePositionNumber, 
     isHeaderRow, 
     isPureText, 
-    extractCodeFromString, 
+    extractCodeFromStrings, 
     extractTotalAmount, 
     parseNumberWithComma, 
     formatNumber
-} = require('../../shareds/estimate-parser-config');
-
+} = require('../../shareds/estimate-parser');
+*/
 // Фикс кодировки имени файла
 function fixFilename(filename) {
     if (!filename) return filename;

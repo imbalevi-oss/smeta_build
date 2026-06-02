@@ -1,15 +1,41 @@
 // shareds/estimate-parser.js
-// ПАРСЕР СМЕТНЫХ ФАЙЛОВ – ПОЛНАЯ ВЕРСИЯ
-// - Автоопределение колонок
-// - Коэффициенты (в строке или следующих строках)
-// - Детали (ЗП, ЭМ, МР, НР, СП) с расчётом сумм
-// - Выделение МР (материальные ресурсы)
-// - Расчёт объёма (количество × единица измерения)
+// ЕДИНЫЙ ПАРСЕР СМЕТ (с поддержкой всех деталей, объёмов и динамического определения колонок)
 
 const XLSX = require('xlsx');
-const { detectCoefficientColumn } = require('./estimate-parser-config');
 
-// ======================== БАЗОВЫЕ УТИЛИТЫ ========================
+// ==================== КОНФИГУРАЦИЯ ====================
+const PARSER_CONFIG = {
+    columnKeywords: {
+        position: ['№', 'п/п', 'пп', 'номер', 'поз', 'pos', 'num'],
+        code: ['шифр', 'расценки', 'код', 'ресурс', 'норматив', 'code'],
+        name: ['наименование', 'работ', 'затрат', 'name'],
+        unit: ['единица', 'измерения', 'ед.изм', 'unit'],
+        quantity: ['кол-во', 'количество', 'quantity', 'объем'],
+        price: ['цена', 'стоимость', 'price', 'расценка'],
+        coefficient: ['поправоч', 'коэф', 'зимн', 'удорож', 'пересчет', 'k', 'коэффициент', 'coeff'],
+        amount: ['всего', 'итого', 'сумма', 'затрат', 'amount', 'total']
+    },
+    universal: {
+        name: 'Универсальный',
+        headerKeywords: [
+            '№', 'п/п', 'пп', 'шифр', 'расценки', 'код', 'ресурс',
+            'наименование', 'работ', 'затрат', 'ед', 'изм', 'единица',
+            'кол-во', 'количество', 'цена', 'стоимость', 'поправоч',
+            'коэф', 'коэффициент', 'зимн', 'удорож', 'пересчет',
+            'пересчёт', 'всего', 'итого', 'затрат'
+        ],
+        searchCoefficientLines: 7
+    },
+    defect: {
+        name: 'Дефектный акт',
+        coefficientColumns: [17, 18, 20, 22],
+        headerRow: 18,
+        startRow: 21,
+        totalKeywords: ['всего', 'итого', 'итог', 'ндс', 'всего по смете', 'всего с ндс']
+    }
+};
+
+// ==================== БАЗОВЫЕ УТИЛИТЫ ====================
 
 function parseNumber(value) {
     if (value === null || value === undefined || value === '') return 0;
@@ -27,65 +53,124 @@ function parseNumber(value) {
 
 function parseNumberWithComma(value) {
     if (value === null || value === undefined || value === '') return null;
-    if (typeof value === 'number') {
-        if (isNaN(value)) return null;
-        return value;
-    }
-    if (typeof value === 'object') {
-        if (value.v !== undefined) value = value.v;
-        else if (value.f !== undefined) value = value.f;
-        else return null;
-        if (typeof value === 'number') return value;
-        if (typeof value !== 'string') return null;
-    }
     let str = String(value).trim();
     if (str === '') return null;
-    str = str.replace(/^[*хx≈~=<>+\\/|:;]+/, '').replace(/\s/g, '');
+    str = str.replace(/\s/g, '');
+    str = str.replace(/^[*хx≈~=<>+\\/|:;]+/, '');
     if (str === '') return null;
-    let normalized = str;
-    if (normalized.includes(',') && normalized.includes('.')) {
-        normalized = normalized.replace(/,/g, '');
-    } else if (normalized.includes(',') && !normalized.includes('.')) {
-        normalized = normalized.replace(',', '.');
+    let result;
+    if (str.includes(',') && !str.includes('.')) {
+        result = str.replace(',', '.');
+    } else if (str.includes(',') && str.includes('.')) {
+        const lastComma = str.lastIndexOf(',');
+        const lastDot = str.lastIndexOf('.');
+        if (lastComma > lastDot) {
+            result = str.replace(/\./g, '').replace(',', '.');
+        } else {
+            result = str.replace(/,/g, '');
+        }
+    } else {
+        result = str;
     }
-    const match = normalized.match(/-?\d+(?:\.\d+)?/);
+    const cleaned = result.replace(/[^\d.\-]/g, '');
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? null : num;
+}
+
+function extractNumericValue(str) {
+    if (!str) return 0;
+    if (typeof str === 'number') return str;
+    const match = String(str).match(/(\d+(?:[.,]\d+)?)/);
     if (match) {
-        const num = parseFloat(match[0]);
-        return isNaN(num) ? null : num;
+        return parseFloat(match[1].replace(',', '.'));
     }
-    return null;
+    return 0;
 }
 
-// Извлечение числового множителя из единицы измерения (например, "1000 м3" → 1000)
-function extractUnitNumber(unitStr) {
-    if (!unitStr) return 1;
-    const match = String(unitStr).match(/(\d+(?:[.,]\d+)?)/);
-    if (match) return parseFloat(match[1].replace(',', '.'));
-    return 1;
+function extractUnit(str) {
+    if (!str) return '';
+    const strClean = String(str).trim();
+    // Если строка состоит только из букв и допустимых символов – это единица
+    if (/^[а-яА-ЯёЁa-zA-Z][а-яА-ЯёЁa-zA-Z\/\.²³]*$/.test(strClean)) {
+        return strClean.replace('2', '²').replace('3', '³');
+    }
+    // Ищем единицу после числа
+    const match = strClean.match(/\d+(?:[.,]\d+)?\s*([а-яА-ЯёЁa-zA-Z0-9\/\.²³]+)/);
+    if (match && match[1]) {
+        let unit = match[1].trim();
+        unit = unit.replace('2', '²').replace('3', '³');
+        return unit;
+    }
+    // Если строка не похожа на число – возвращаем её как единицу
+    if (!/^[\d\s.,-]+$/.test(strClean) && strClean.length > 0) {
+        return strClean;
+    }
+    return '';
 }
 
-// Нормализация названия единицы измерения (убирает число)
-function normalizeUnitName(unitStr) {
-    if (!unitStr) return '';
-    return String(unitStr).replace(/^\d+(?:[.,]\d+)?\s*/, '').trim();
-}
-
-// Форматирование объёма: количество × числовой множитель единицы измерения
-function formatVolume(quantity, unitStr) {
+function calculateVolume(quantity, unitStr) {
     const qty = parseNumber(quantity);
-    const unitNumber = extractUnitNumber(unitStr);
-    const volume = qty * unitNumber;
-    if (volume === 0) return '';
-    const unitName = normalizeUnitName(unitStr);
-    const formatted = volume.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
-    return unitName ? `${formatted} ${unitName}` : formatted;
+    const unitValue = extractNumericValue(unitStr);
+    let result;
+    if (unitValue > 0 && qty > 0) {
+        result = qty * unitValue;
+        console.log(`📐 calculateVolume: ${qty} × ${unitValue} = ${result} (unitStr: "${unitStr}")`);
+    } else {
+        result = qty;
+        console.log(`📐 calculateVolume: unitValue=${unitValue}, qty=${qty} → result=${result}`);
+    }
+    return result;
 }
 
-function extractCodeFromString(str) {
+function formatVolume(volume, unitStr) {
+    if (volume === 0) return '';
+    const unit = extractUnit(unitStr);
+    const formattedVolume = volume.toLocaleString('ru-RU', { 
+        minimumFractionDigits: 0, 
+        maximumFractionDigits: 3 
+    });
+    let result;
+    if (unit && unit.length > 0) {
+        result = `${formattedVolume} ${unit}`;
+    } else {
+        result = formattedVolume;
+    }
+    console.log(`📐 formatVolume: volume=${volume}, unitStr="${unitStr}" → "${result}"`);
+    return result;
+}
+
+function formatVolume(volume, unitStr) {
+    if (volume === 0) return '';
+    const unit = extractUnit(unitStr);
+    const formattedVolume = volume.toLocaleString('ru-RU', { 
+        minimumFractionDigits: 0, 
+        maximumFractionDigits: 3 
+    });
+    if (unit && unit.length > 0) {
+        return `${formattedVolume} ${unit}`;
+    }
+    return formattedVolume;
+}
+
+function isMR(text) {
+    if (!text) return false;
+    const lowerText = text.toLowerCase().trim();
+    if (lowerText === 'мр') return true;
+    if (lowerText.startsWith('мр') || lowerText.startsWith('мр ')) return true;
+    if (/\bмр\b/.test(lowerText)) return true;
+    if (lowerText.includes('материал')) return true;
+    return false;
+}
+
+// ==================== ИЗВЛЕЧЕНИЕ КОДА (РАСШИРЕННОЕ) ====================
+
+function extractCodeFromStrings(str) {
     if (!str || typeof str !== 'string') return { code: null, comment: '' };
     const trimmed = str.trim();
     if (trimmed === '') return { code: null, comment: '' };
-    if (trimmed.toLowerCase().startsWith('цена поставщика')) return { code: trimmed, comment: '' };
+    if (trimmed.toLowerCase().startsWith('цена поставщика')) {
+        return { code: trimmed, comment: '' };
+    }
     const patterns = [
         /^(\d+\.\d+-\d+-\d+-\d+\/\d+)/,
         /^(\d+\.\d+-\d+-\d+-\d+)/,
@@ -94,7 +179,7 @@ function extractCodeFromString(str) {
         /^(\d{1,2}-\d{2}-\d{3}-\d{2})/,
         /^(\d{1,2}\.\d{2}-\d{3}-\d{2})/,
         /^(\d{1,2}\.\d{2}\.\d{3}\.\d{2})/,
-        /^(?:ГЭСН|ФЕР|ТЕР|СН)?\s*(\d{1,2}[.-]\d{2}[.-]\d{3}[.-]\d{2})/i,
+        /^(?:ГЭСН|ФЕР|ТЕР|СН|МТСН|ТСН|МРР)?\s*(\d{1,2}[.-]\d{2}[.-]\d{3}[.-]\d{2}(?:-\d+)?(?:\/\d+)?)/i,
         /^(\d+\.\d+\.\d+\.\d+)/,
         /^(\d+\.\d+-\d+-\d+)/,
         /^(\d+-\d+-\d+-\d+)/,
@@ -114,429 +199,348 @@ function extractCodeFromString(str) {
     return { code: null, comment: trimmed };
 }
 
-function isDetailRow(text) {
-    if (!text) return false;
-    const lowerText = text.toLowerCase().trim();
-    const detailKeywords = ['зп', 'эм', 'мр', 'нр', 'сп', 'зтр', 'в т.ч.', 'в тч', 'зпм'];
-    return detailKeywords.some(kw => lowerText === kw || lowerText.startsWith(kw + ' ') || lowerText.startsWith(kw));
+// ==================== ФУНКЦИИ ПОИСКА ЗАГОЛОВКОВ И КОЛОНОК ====================
+
+function findHeaderRows(data) {
+    const headerRows = [];
+    const headerKeywords = PARSER_CONFIG.universal.headerKeywords;
+    for (let i = 0; i < Math.min(50, data.length); i++) {
+        const row = data[i];
+        if (!row) continue;
+        const rowStr = row.map(c => String(c || '').toLowerCase()).join(' ');
+        let hasHeaderWord = false;
+        for (const kw of headerKeywords) {
+            if (rowStr.includes(kw)) {
+                hasHeaderWord = true;
+                break;
+            }
+        }
+        if (hasHeaderWord) headerRows.push(i);
+    }
+    return headerRows;
 }
 
-function isMR(text) {
-    if (!text) return false;
-    const lowerText = text.toLowerCase().trim();
-    if (lowerText === 'мр') return true;
-    if (lowerText.startsWith('мр') || lowerText.startsWith('мр ')) return true;
-    if (/\bмр\b/.test(lowerText)) return true;
-    if (lowerText.includes('материал')) return true;
-    return false;
+function detectColumnsFromMultiRowHeader(data, headerRows) {
+    const columns = { position: -1, code: -1, coefficient: -1, amount: -1 };
+    const keywords = PARSER_CONFIG.columnKeywords;
+    const headerCells = [];
+    for (const rowIdx of headerRows) {
+        const row = data[rowIdx];
+        if (!row) continue;
+        for (let colIdx = 0; colIdx < row.length; colIdx++) {
+            const cell = String(row[colIdx] || '').toLowerCase();
+            if (!headerCells[colIdx]) headerCells[colIdx] = '';
+            headerCells[colIdx] += ' ' + cell;
+        }
+    }
+    headerCells.forEach((cellStr, index) => {
+        if (!cellStr) return;
+        if (columns.position === -1 && keywords.position.some(kw => cellStr.includes(kw))) columns.position = index;
+        if (columns.code === -1 && keywords.code.some(kw => cellStr.includes(kw))) columns.code = index;
+        if (columns.coefficient === -1 && keywords.coefficient.some(kw => cellStr.includes(kw))) columns.coefficient = index;
+        if (columns.amount === -1 && keywords.amount.some(kw => cellStr.includes(kw))) columns.amount = index;
+    });
+    return columns;
+}
+
+function detectAmountColumnUniversal(data, headerRows) {
+    for (const headerRowIdx of headerRows) {
+        const headerRow = data[headerRowIdx];
+        if (!headerRow) continue;
+        for (let col = 0; col < headerRow.length; col++) {
+            const cell = String(headerRow[col] || '').toLowerCase();
+            if (cell.includes('всего затрат') || cell === 'всего затрат, руб.' || cell.includes('итого затрат') ||
+                cell.includes('всего затрат, руб') || cell === 'всего' || cell === 'итого') {
+                return col;
+            }
+        }
+    }
+    const startRow = headerRows.length > 0 ? Math.max(...headerRows) + 1 : 27;
+    const columnSums = {};
+    for (let i = startRow; i < Math.min(startRow + 300, data.length); i++) {
+        const row = data[i];
+        if (!row) continue;
+        const firstCell = row[0] ? String(row[0]).toLowerCase() : '';
+        if (firstCell.includes('итого')) continue;
+        for (let col = 5; col < Math.min(row.length, 15); col++) {
+            const amount = parseNumberWithComma(row[col]);
+            if (amount !== null && amount > 1000 && amount < 1000000000) {
+                if (!columnSums[col]) columnSums[col] = 0;
+                columnSums[col] += amount;
+            }
+        }
+    }
+    let bestCol = 9;
+    let maxSum = 0;
+    for (let col = 5; col <= 12; col++) {
+        const sum = columnSums[col] || 0;
+        if (sum > maxSum) {
+            maxSum = sum;
+            bestCol = col;
+        }
+    }
+    return bestCol;
+}
+
+function findDataStartRow(data, headerRows) {
+    if (!headerRows || headerRows.length === 0) return 27;
+    const lastHeaderRow = Math.max(...headerRows);
+    for (let i = lastHeaderRow + 1; i < Math.min(lastHeaderRow + 15, data.length); i++) {
+        const row = data[i];
+        if (!row) continue;
+        for (let j = 0; j < Math.min(5, row.length); j++) {
+            if (isPositionNumber(row[j])) return i;
+        }
+    }
+    return lastHeaderRow + 1;
 }
 
 function isPositionNumber(str) {
     if (!str && str !== 0) return false;
     const trimmed = String(str).trim();
     if (trimmed === '') return false;
-    return /^\d+(\.\d+)?$/.test(trimmed.replace(',', '.'));
+    const normalized = trimmed.replace(/,/g, '.');
+    return /^\d+(\.\d+)*$/.test(normalized);
 }
 
-function normalizePositionNumber(str) {
-    if (!str && str !== 0) return '';
-    return String(str).trim().replace(',', '.');
+function isPureText(str) {
+    if (!str || typeof str !== 'string') return false;
+    const trimmed = str.trim();
+    if (trimmed.length === 0) return false;
+    const { code } = extractCodeFromStrings(str);
+    if (code) return false;
+    const textPhrases = ['цена поставщика', 'поправка', 'примечание', 'сн-2012', 'сн2012', 'письмо', 'разъяснение', 'минстрой'];
+    const lowerTrimmed = trimmed.toLowerCase();
+    if (textPhrases.some(phrase => lowerTrimmed.includes(phrase))) return true;
+    if (/^[a-zA-Zа-яА-ЯёЁ]/.test(trimmed)) return true;
+    return false;
 }
 
-// ======================== ОПРЕДЕЛЕНИЕ КОЛОНОК ========================
+// ==================== ОСНОВНАЯ ФУНКЦИЯ ПАРСИНГА (УЛУЧШЕННАЯ) ====================
 
-function findHeaderRow(data) {
-    for (let i = 0; i < Math.min(100, data.length); i++) {
-        const row = data[i];
-        if (!row) continue;
-        const rowStr = row.map(c => String(c || '').toLowerCase()).join(' ');
-        if (rowStr.includes('поправоч') || rowStr.includes('коэф') || rowStr.includes('коэффициент')) {
-            console.log(`   🔍 Заголовок с коэффициентом найден в строке ${i+1}`);
-            return i;
-        }
-    }
-    for (let i = 0; i < Math.min(100, data.length); i++) {
-        const row = data[i];
-        if (!row) continue;
-        const rowStr = row.map(c => String(c || '').toLowerCase()).join(' ');
-        if (rowStr.includes('№') && rowStr.includes('п/п') && rowStr.includes('шифр')) {
-            console.log(`   🔍 Заголовок (альтернативный) найден в строке ${i+1}`);
-            return i;
-        }
-    }
-    console.log(`   ⚠️ Заголовок не найден, используем строку 27`);
-    return 27;
-}
-
-function detectColumnsFromHeader(headerRow) {
-    const columns = { position: -1, code: -1, coefficient: -1, amount: -1 };
-    if (!headerRow) return columns;
-    for (let col = 0; col < headerRow.length; col++) {
-        const cell = String(headerRow[col] || '').toLowerCase();
-        if (columns.position === -1 && (cell.includes('№') || cell.includes('п/п') || cell === 'пп'))
-            columns.position = col;
-        if (columns.code === -1 && (cell === 'код' || cell.includes('шифр') || cell === 'ресурс'))
-            columns.code = col;
-        if (columns.coefficient === -1 && (cell.includes('коэф') || cell === 'k' || cell.includes('поправоч')))
-            columns.coefficient = col;
-        if (columns.amount === -1 && (cell.includes('всего') || cell.includes('итого') || cell === 'сумма'))
-            columns.amount = col;
-    }
-    return columns;
-}
-
-function findDataStartRow(data, headerRowIdx) {
-    for (let i = headerRowIdx + 1; i < Math.min(headerRowIdx + 30, data.length); i++) {
-        const row = data[i];
-        if (!row) continue;
-        if (isPositionNumber(row[0]) && row[1] && String(row[1]).trim().length > 0) return i;
-    }
-    return headerRowIdx + 1;
-}
-
-// ======================== ОСНОВНАЯ ФУНКЦИЯ ПАРСИНГА ========================
-
-function parseEstimate(fileBuffer, fileName = '') {
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`📊 ПАРСИНГ СМЕТЫ: ${fileName || 'файл'}`);
-    console.log(`${'='.repeat(80)}`);
+function parseFullEstimate(fileBuffer) {
+    console.log('\n' + '='.repeat(70));
+    console.log('🔍 FULL ESTIMATE PARSER - УЛУЧШЕННАЯ ВЕРСИЯ');
+    console.log('='.repeat(70));
 
     try {
         const workbook = XLSX.read(fileBuffer, { type: 'buffer', cellDates: true });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-        console.log(`   📄 Лист: ${sheetName}`);
-        console.log(`   📊 Всего строк: ${data.length}`);
+        console.log(`📄 Лист: ${workbook.SheetNames[0]}, строк: ${data.length}`);
 
-        const headerRowIdx = findHeaderRow(data);
-        const headerRow = data[headerRowIdx];
-        let columns = detectColumnsFromHeader(headerRow);
-        const startRow = findDataStartRow(data, headerRowIdx);
+        // Определяем структуру файла
+        const headerRows = findHeaderRows(data);
+        const startRow = findDataStartRow(data, headerRows);
+        const columns = detectColumnsFromMultiRowHeader(data, headerRows);
+        const amountCol = detectAmountColumnUniversal(data, headerRows);
 
-        if (columns.position === -1) columns.position = 0;
-        if (columns.code === -1) columns.code = 2;
-        if (columns.coefficient === -1) {
-            const detectedCoeffCol = detectCoefficientColumn(data, startRow);
-            if (detectedCoeffCol !== -1) {
-                columns.coefficient = detectedCoeffCol;
-                console.log(`   🔍 Колонка коэффициента автоматически определена: ${columns.coefficient + 1} (${String.fromCharCode(65 + columns.coefficient)})`);
-            } else {
-                columns.coefficient = 8;
-                console.log(`   ⚠️ Колонка коэффициента не найдена, используем по умолчанию 9 (I)`);
-            }
-        }
-        if (columns.amount === -1) columns.amount = 9;
+        const codeCol = columns.code !== -1 ? columns.code : 1;      // B
+        const nameCol = 2;           // C
+        const unitCol = 3;           // D
+        const quantityCol = 4;       // E
+        const priceCol = 5;          // F
+        const coeffCol = columns.coefficient !== -1 ? columns.coefficient : 6; // G
+        const positionCol = columns.position !== -1 ? columns.position : 0;    // A
 
-        console.log(`\n📌 ОПРЕДЕЛЁННЫЕ КОЛОНКИ:`);
-        console.log(`   Позиция: ${columns.position + 1} (${String.fromCharCode(65 + columns.position)})`);
-        console.log(`   Код: ${columns.code + 1} (${String.fromCharCode(65 + columns.code)})`);
-        console.log(`   Коэффициент: ${columns.coefficient + 1} (${String.fromCharCode(65 + columns.coefficient)})`);
-        console.log(`   Сумма: ${columns.amount + 1} (${String.fromCharCode(65 + columns.amount)})`);
-        console.log(`   Начало данных: строка ${startRow + 1}`);
-
-        // Вывод структуры файла (первые 30 строк)
-        console.log(`\n${'─'.repeat(80)}`);
-        console.log(`📋 СТРУКТУРА ФАЙЛА (первые 30 строк):`);
-        console.log(`${'─'.repeat(80)}`);
-        console.log(`   Row | Поз      | Код                       | Наименование             | Коэф     | Сумма       |`);
-        console.log(`${'─'.repeat(80)}`);
-        for (let i = 0; i < Math.min(30, data.length); i++) {
-            const row = data[i];
-            if (row) {
-                const pos = (row[columns.position] || '').toString().substring(0, 8);
-                const code = (row[columns.code] || '').toString().substring(0, 25);
-                const name = (row[2] || '').toString().substring(0, 25);
-                const coeffRaw = row[columns.coefficient];
-                const coeff = coeffRaw !== undefined && coeffRaw !== null && coeffRaw !== '' ? String(coeffRaw).substring(0, 8) : '';
-                const amount = (row[columns.amount] || '').toString().substring(0, 12);
-                console.log(`   ${String(i+1).padStart(3)} | ${pos.padEnd(8)} | ${code.padEnd(25)} | ${name.padEnd(25)} | ${coeff.padEnd(8)} | ${amount.padEnd(10)} |`);
-            }
-        }
-        console.log(`${'─'.repeat(80)}`);
+        console.log(`\n📊 Определённые колонки:`);
+        console.log(`   Позиция: ${positionCol+1} (${String.fromCharCode(65+positionCol)})`);
+        console.log(`   Код: ${codeCol+1} (${String.fromCharCode(65+codeCol)})`);
+        console.log(`   Коэффициент: ${coeffCol+1} (${String.fromCharCode(65+coeffCol)})`);
+        console.log(`   Сумма: ${amountCol+1} (${String.fromCharCode(65+amountCol)})`);
+        console.log(`   Начало данных: строка ${startRow+1}`);
 
         const positions = [];
         let i = startRow;
-        let positionCounter = 1;
-        let totalAmount = 0;
-        let skippedCount = 0;
-
-        console.log(`\n🔍 НАЧАЛО СБОРА ПОЗИЦИЙ (сумма из колонки суммы)`);
-        console.log(`${'─'.repeat(80)}`);
+        let positionCounter = 0;
 
         while (i < data.length) {
             const row = data[i];
-            if (!row) { i++; continue; }
+            if (!row || row.length === 0) { i++; continue; }
 
-            const firstCell = (row[0] || '').toString().toLowerCase();
-            if (firstCell.includes('итого') || firstCell.includes('раздел') ||
-                firstCell.includes('подраздел') || firstCell.includes('составил') ||
-                firstCell.includes('проверил') || firstCell.includes('ндс')) {
-                console.log(`   ⏭️ Пропуск служебной строки ${i+1}: "${firstCell.substring(0, 40)}"`);
-                i++;
-                skippedCount++;
-                continue;
-            }
+            const codeRaw = row[codeCol] ? String(row[codeCol]).trim() : '';
+            if (codeRaw === '') { i++; continue; }
 
-            const positionValue = row[columns.position];
-            if (!positionValue || !isPositionNumber(positionValue)) { i++; continue; }
+            const { code: extractedCode } = extractCodeFromStrings(codeRaw);
+            const isTextPos = !extractedCode && isPureText(codeRaw);
 
-            const codeRaw = row[columns.code] ? String(row[columns.code]).trim() : '';
-            if (/^\d+$/.test(codeRaw) && codeRaw.length <= 3) {
-                console.log(`   ⏭️ Пропуск строки ${i+1}: код "${codeRaw}" – вероятно, не шифр`);
-                i++;
-                skippedCount++;
-                continue;
-            }
+            if (!extractedCode && !isTextPos) { i++; continue; }
 
-            const positionNumber = normalizePositionNumber(positionValue);
-            const codeCell = codeRaw;
-            const { code: extractedCode } = extractCodeFromString(codeCell);
-            const name = row[2] ? String(row[2]).trim() : '';
-            const unit = row[3] ? String(row[3]).trim() : '';
-            const quantity = parseNumber(row[4]);
-            const volume = formatVolume(quantity, unit);
-            
-            // Коэффициент
-            let coefficient = null;
-            const coeffCell = row[columns.coefficient];
-            if (coeffCell !== undefined && coeffCell !== null && coeffCell !== '') {
-                coefficient = parseNumberWithComma(coeffCell);
-                if (coefficient !== null && coefficient !== 1) {
-                    console.log(`      🔍 Коэффициент в строке позиции ${i+1}: сырое = ${JSON.stringify(coeffCell)}, значение = ${coefficient}`);
-                }
-            }
-            if (coefficient === null || coefficient === 1) {
-                let searchLimit = 5;
-                let j = i + 1;
-                while (j < data.length && j - i <= searchLimit) {
-                    const nextRow = data[j];
-                    if (!nextRow) { j++; continue; }
-                    const nextPos = nextRow[columns.position];
-                    if (nextPos && isPositionNumber(nextPos)) break;
-                    const nextCoeffCell = nextRow[columns.coefficient];
-                    if (nextCoeffCell !== undefined && nextCoeffCell !== null && nextCoeffCell !== '') {
-                        const nextCoeff = parseNumberWithComma(nextCoeffCell);
-                        if (nextCoeff !== null && nextCoeff !== 0 && nextCoeff !== 1) {
-                            coefficient = nextCoeff;
-                            console.log(`      🔍 Коэффициент найден в строке ${j+1}: ${coefficient}`);
-                            break;
-                        }
-                    }
-                    j++;
-                }
-                if (coefficient === null) console.log(`      ⚠️ Коэффициент не найден ни в строке позиции, ни в следующих строках`);
-            }
-            
-            let positionTotal = parseNumber(row[columns.amount]);
+            positionCounter++;
+            console.log(`\n📍 Позиция ${positionCounter} (строка ${i+1})`);
 
-            console.log(`\n${'─'.repeat(80)}`);
-            console.log(`📍 ПОЗИЦИЯ ${positionCounter} (строка ${i+1})`);
-            console.log(`   № п/п: ${positionNumber}`);
-            console.log(`   Код: ${extractedCode || codeCell || '—'}`);
-            console.log(`   Наименование: ${name.substring(0, 80)}${name.length>80?'…':''}`);
-            console.log(`   Ед.изм.: ${unit || '—'}`);
-            console.log(`   Количество: ${quantity}`);
-            console.log(`   Объём: ${volume || '—'}`);
-            console.log(`   Коэффициент: ${coefficient !== null ? coefficient : '—'}`);
-            console.log(`   🔍 СУММА В СТРОКЕ (колонка ${String.fromCharCode(65+columns.amount)}): исходное = "${row[columns.amount]}", parse = ${positionTotal}`);
-
-            // Сбор деталей
+            // Собираем все детали (строки, идущие следом, пока не появится новая позиция)
             let details = [];
-            let detailsTotal = 0;
-            let detailSumLog = [];
-            let mrTotalAmount = 0;
-            let mrDetails = [];
             let j = i + 1;
-            let detailCount = 0;
-
             while (j < data.length) {
                 const nextRow = data[j];
-                if (!nextRow) { j++; continue; }
+                if (!nextRow) break;
 
-                const nextPos = nextRow[columns.position];
-                if (nextPos && isPositionNumber(nextPos)) {
-                    console.log(`   🔚 Конец деталей на строке ${j+1} (начало новой позиции ${normalizePositionNumber(nextPos)})`);
-                    break;
-                }
+                const nextCodeRaw = nextRow[codeCol] ? String(nextRow[codeCol]).trim() : '';
+                const nextExtracted = extractCodeFromStrings(nextCodeRaw).code;
+                // Если в следующей строке есть код (или текстовая позиция) – это новая позиция
+                if ((nextExtracted && nextExtracted !== extractedCode) || isPureText(nextCodeRaw)) break;
 
-                const detailName = nextRow[2] ? String(nextRow[2]).trim() : '';
+                const detailName = nextRow[nameCol] ? String(nextRow[nameCol]).trim() : '';
                 if (detailName === '') { j++; continue; }
 
-                if (isDetailRow(detailName)) {
-                    detailCount++;
-                    let detailAmount = parseNumber(nextRow[columns.amount]);
-                    console.log(`      🔎 ДЕТАЛЬ ${detailCount}: тип="${detailName}", сырое значение суммы="${nextRow[columns.amount]}", parseNumber = ${detailAmount}`);
-                    
-                    if (detailAmount === 0 && parseNumber(nextRow[4]) !== 0 && parseNumber(nextRow[5]) !== 0) {
-                        const q = parseNumber(nextRow[4]);
-                        const p = parseNumber(nextRow[5]);
-                        const c = parseNumberWithComma(nextRow[columns.coefficient]) || 1;
-                        detailAmount = q * p * c;
-                        console.log(`      🔄 Рассчитано из кол-во×цена×коэф: ${q} * ${p} * ${c} = ${detailAmount}`);
-                    }
-                    
-                    detailsTotal += detailAmount;
-                    detailSumLog.push(`${detailName}=${detailAmount}`);
-                    
-                    const detailQuantity = parseNumber(nextRow[4]);
-                    const detailPrice = parseNumber(nextRow[5]);
-                    const detailUnit = nextRow[3] ? String(nextRow[3]).trim() : '';
-                    const detailVolume = formatVolume(detailQuantity, detailUnit);
-                    
-                    details.push({
-                        type: detailName,
-                        amount: detailAmount,
-                        quantity: detailQuantity,
-                        price: detailPrice,
-                        unit: detailUnit,
-                        volume: detailVolume,
-                        rowNumber: j + 1
-                    });
-                    
-                    if (isMR(detailName)) {
-                        mrTotalAmount += detailAmount;
-                        mrDetails.push({
-                            type: 'МР',
-                            originalType: detailName,
-                            amount: detailAmount,
-                            quantity: detailQuantity,
-                            price: detailPrice,
-                            unit: detailUnit,
-                            volume: detailVolume,
-                            rowNumber: j + 1
-                        });
-                        console.log(`      🏷️ Деталь помечена как МР! Сумма МР: ${mrTotalAmount.toLocaleString('ru-RU')} ₽`);
-                    }
-                    
-                    console.log(`      📄 Деталь ${detailCount}: "${detailName}" | Сумма: ${detailAmount.toLocaleString('ru-RU')} ₽ | Строка: ${j+1}`);
-                }
+                const detailAmount = parseNumber(nextRow[amountCol]);
+                const detailQuantity = parseNumber(nextRow[quantityCol]);
+                const detailPrice = parseNumber(nextRow[priceCol]);
+                const detailUnit = nextRow[unitCol] ? String(nextRow[unitCol]).trim() : '';
+
+                details.push({
+                    type: detailName,
+                    amount: detailAmount,
+                    quantity: detailQuantity,
+                    price: detailPrice,
+                    unit: detailUnit,
+                    rowNumber: j + 1
+                });
                 j++;
             }
 
-            // Проверка, является ли сама позиция МР
-            const positionIsMR = isMR(name) || isMR(codeCell);
-            let positionMrContribution = 0;
-            if (positionIsMR) {
-                positionMrContribution = positionTotal;
-                mrTotalAmount += positionMrContribution;
-                mrDetails.push({
-                    type: 'МР',
-                    originalType: 'Позиция (МР)',
-                    amount: positionTotal,
-                    quantity: quantity,
-                    price: parseNumber(row[5]),
-                    unit: unit,
-                    volume: volume,
-                    rowNumber: i + 1,
-                    isMainRow: true
-                });
-                console.log(`      🏷️ Основная строка позиции помечена как МР! Добавлено к МР: ${positionMrContribution.toLocaleString('ru-RU')} ₽`);
-            }
+            // Основные данные позиции
+            const positionNumber = row[positionCol] ? String(row[positionCol]).trim() : String(positionCounter);
+            const name = row[nameCol] ? String(row[nameCol]).trim() : '';
+            const unit = row[unitCol] ? String(row[unitCol]).trim() : '';
+            const quantity = parseNumber(row[quantityCol]);
+            const price = parseNumber(row[priceCol]);
+            const coefficient = parseNumber(row[coeffCol]);
+            const finalCoeff = (coefficient !== 0 && coefficient !== 1) ? coefficient : null;
 
-            console.log(`   📊 СУММА ДЕТАЛЕЙ (detailsTotal) = ${detailsTotal}`);
-            if (detailSumLog.length) console.log(`      Расклад: ${detailSumLog.join(', ')}`);
-            console.log(`   📦 СУММА МР (материальные ресурсы) = ${mrTotalAmount.toLocaleString('ru-RU')} ₽`);
+            const amountFromRow = parseNumber(row[amountCol]);
+            const sumDetails = details.reduce((s, d) => s + d.amount, 0);
+            const totalAmount = amountFromRow + sumDetails;
 
-            let total = positionTotal + detailsTotal;
-            console.log(`   💰 ИТОГОВАЯ СУММА ПОЗИЦИИ: ${positionTotal} + ${detailsTotal} = ${total} ₽`);
+            // Объём
+            const volume = calculateVolume(quantity, unit);
+            const formattedVolume = formatVolume(volume, unit);
 
-            if (total === 0 && quantity !== 0 && parseNumber(row[5]) !== 0) {
-                const price = parseNumber(row[5]);
-                total = quantity * price * (coefficient || 1);
-                console.log(`   🔄 Альтернативный расчёт (кол-во×цена×коэф): ${total} ₽`);
-                if (positionIsMR && total !== 0) {
-                    mrTotalAmount = mrTotalAmount - positionMrContribution + total;
-                    const mainMrIndex = mrDetails.findIndex(d => d.isMainRow === true);
-                    if (mainMrIndex !== -1) mrDetails[mainMrIndex].amount = total;
-                    console.log(`      🔄 Пересчитана сумма МР для основной позиции: ${total.toLocaleString('ru-RU')} ₽`);
-                }
-            }
-
-            totalAmount += total;
-            console.log(`   💰 НАКОПЛЕННАЯ ОБЩАЯ СУММА после позиции ${positionCounter}: ${totalAmount}`);
+            // Детали только МР (для обратной совместимости с фронтендом)
+            const mrDetails = details.filter(d => isMR(d.type));
+            const mrTotalAmount = mrDetails.reduce((s, d) => s + d.amount, 0);
 
             positions.push({
                 positionNumber: positionNumber,
-                code: extractedCode || codeCell,
+                code: codeRaw,
+                extractedCode: extractedCode,
                 name: name,
                 unit: unit,
                 quantity: quantity,
-                formattedVolume: volume,
-                coefficient: coefficient,
-                totalAmount: total,
-                amountFromRow: positionTotal,
-                details: details,
-                detailsTotal: detailsTotal,
-                rowNumber: i + 1,
-                isTextPosition: (!extractedCode && !isDetailRow(name)) && (name.length > 0),
+                price: price,
+                coefficient: finalCoeff,
+                volume: volume,
+                formattedVolume: formattedVolume,
+                totalAmount: totalAmount,
+                amountFromRow: amountFromRow,
+                details: details,           // все детали (ЗП, ЭМ, МР, НР, СП, ...)
+                mrDetails: mrDetails,
                 mrTotalAmount: mrTotalAmount,
-                mrDetails: mrDetails
+                sumAllDetails: sumDetails,
+                isTextPosition: isTextPos,
+                hasDetails: details.length > 0
             });
 
-            positionCounter++;
             i = j;
         }
 
-        console.log(`\n${'='.repeat(80)}`);
-        console.log(`📊 ИТОГИ ПАРСИНГА СМЕТЫ:`);
-        console.log(`   ✅ Всего позиций: ${positions.length}`);
-        console.log(`   💰 Общая сумма: ${totalAmount.toLocaleString('ru-RU')} ₽`);
-        console.log(`   📦 С детализацией: ${positions.filter(p => p.details.length > 0).length}`);
-        const positionsWithMr = positions.filter(p => p.mrDetails.length > 0);
-        console.log(`   🧱 Позиций с МР: ${positionsWithMr.length}`);
-        const totalMr = positions.reduce((sum, p) => sum + (p.mrTotalAmount || 0), 0);
-        console.log(`   🧱 Общая сумма МР: ${totalMr.toLocaleString('ru-RU')} ₽`);
-        console.log(`   ⏭️ Пропущено строк: ${skippedCount}`);
-        console.log(`${'='.repeat(80)}\n`);
+        const totalFullAmount = positions.reduce((s, p) => s + p.totalAmount, 0);
+        const totalMrAmount = positions.reduce((s, p) => s + p.mrTotalAmount, 0);
 
-        if (positions.length > 0) {
-            console.log(`📋 ДЕТАЛЬНЫЙ СПИСОК ПОЗИЦИЙ:`);
-            console.log(`${'='.repeat(80)}`);
-            for (const pos of positions) {
-                console.log(`\n   ${pos.positionNumber} | ${pos.code || '—'}`);
-                console.log(`      Наименование: ${pos.name.substring(0, 70)}`);
-                console.log(`      Объём: ${pos.formattedVolume || '—'}`);
-                console.log(`      Коэффициент: ${pos.coefficient !== null ? pos.coefficient : '—'}`);
-                console.log(`      Сумма: ${pos.totalAmount.toLocaleString('ru-RU')} ₽`);
-                if (pos.mrDetails.length > 0) console.log(`      МР (${pos.mrDetails.length}): ${pos.mrTotalAmount.toLocaleString('ru-RU')} ₽`);
-                if (pos.details.length > 0) {
-                    console.log(`      Детали (${pos.details.length}):`);
-                    for (const d of pos.details) console.log(`         - ${d.type}: ${d.amount.toLocaleString('ru-RU')} ₽`);
-                }
-            }
-            console.log(`${'='.repeat(80)}\n`);
-        }
+        console.log(`\n📊 РЕЗУЛЬТАТЫ ПАРСИНГА:`);
+        console.log(`   Всего позиций: ${positions.length}`);
+        console.log(`   ОБЩАЯ СУММА: ${totalFullAmount.toLocaleString('ru-RU')} ₽`);
+        console.log(`   МР: ${totalMrAmount.toLocaleString('ru-RU')} ₽`);
 
         return {
             success: true,
-            fileName: fileName,
-            sheetName: sheetName,
-            totalItems: positions.length,
-            totalAmount: totalAmount,
-            totalAmountFormatted: totalAmount.toLocaleString('ru-RU'),
-            items: positions,
-            detectedColumns: {
-                position: columns.position + 1,
-                code: columns.code + 1,
-                coefficient: columns.coefficient + 1,
-                amount: columns.amount + 1
+            estimateName: workbook.SheetNames[0],
+            totalAmount: totalFullAmount,
+            totalMrAmount: totalMrAmount,
+            totalAmountFormatted: totalFullAmount.toLocaleString('ru-RU'),
+            positions: positions,
+            stats: {
+                totalPositions: positions.length,
+                textPositions: positions.filter(p => p.isTextPosition).length,
+                totalMrAmount: totalMrAmount,
+                totalDetailRows: positions.reduce((s, p) => s + p.details.length, 0),
+                totalMrRows: positions.reduce((s, p) => s + p.mrDetails.length, 0)
             }
         };
-
     } catch (error) {
-        console.error(`❌ Ошибка парсинга сметы:`, error);
-        console.error(`   Stack:`, error.stack);
+        console.error('❌ Ошибка в parseFullEstimate:', error);
         return {
             success: false,
             error: error.message,
-            fileName: fileName,
-            items: [],
+            estimateName: 'Ошибка',
             totalAmount: 0,
-            totalItems: 0
+            totalMrAmount: 0,
+            totalAmountFormatted: '0',
+            positions: [],
+            stats: {}
         };
     }
 }
 
-module.exports = { parseEstimate };
+/**
+ * Упрощённый интерфейс для analyze.js
+ */
+function parseEstimate(fileBuffer, originalName) {
+    const result = parseFullEstimate(fileBuffer);
+    if (!result.success) {
+        return {
+            success: false,
+            error: result.error,
+            items: [],
+            totalAmount: 0,
+            totalAmountFormatted: '0',
+            sheetName: 'Ошибка',
+            detectedColumns: { position: 0, code: 1, amount: 9, coefficient: 6 }
+        };
+    }
+    const items = result.positions.map(pos => ({
+        positionNumber: pos.positionNumber,
+        code: pos.code,
+        name: pos.name,
+        totalAmount: pos.totalAmount,
+        quantity: pos.quantity,
+        unit: pos.unit,
+        coefficient: pos.coefficient,
+        isTextPosition: pos.isTextPosition,
+        details: pos.details,
+        mrDetails: pos.mrDetails,
+        mrTotalAmount: pos.mrTotalAmount,
+        volume: pos.volume,
+        formattedVolume: pos.formattedVolume,
+        rowNumber: pos.rowNumber
+    }));
+    return {
+        success: true,
+        items: items,
+        totalAmount: result.totalAmount,
+        totalAmountFormatted: result.totalAmountFormatted,
+        sheetName: result.estimateName,
+        detectedColumns: { position: 0, code: 1, amount: 9, coefficient: 6 }
+    };
+}
+
+// ==================== ЭКСПОРТ ====================
+module.exports = {
+    parseFullEstimate,
+    parseEstimate,
+    extractCodeFromStrings,
+    parseNumber,
+    parseNumberWithComma,
+    extractUnit,
+    calculateVolume,
+    formatVolume,
+    isMR,
+    findHeaderRows,
+    detectColumnsFromMultiRowHeader,
+    detectAmountColumnUniversal,
+    findDataStartRow,
+    isPositionNumber,
+    isPureText
+};

@@ -98,7 +98,6 @@ export async function uploadNewVersionToProject() {
     formData.append('projectId', AppState.currentProjectId);
     formData.append('isRevised', 'false');
     
-    // НЕ ДОБАВЛЯЕМ файлы КС-2
     const submitBtn = document.getElementById('analyzeEstimateBtn');
     const originalText = submitBtn?.innerHTML || 'Анализировать';
     
@@ -151,19 +150,12 @@ export async function uploadNewVersionToProject() {
             updateState('lastSessionId', sessionId);
         }
         
-        // Фильтрация проблемных позиций
-        const problemPositions = positions.filter(pos => 
-            pos && (pos.statusCategory === 'warning' || 
-                    pos.statusCategory === 'notallowed' || 
-                    pos.statusCategory === 'text' ||
-                    pos.isTextPosition === true)
-        );
-        
-        updateState('currentResults', problemPositions);
+        // СОХРАНЯЕМ ВСЕ ПОЗИЦИИ, А НЕ ТОЛЬКО ПРОБЛЕМНЫЕ
+        updateState('currentResults', positions);
         
         displayMrStats(positions, stats, totalMrAmount);
         
-        const hasProblems = problemPositions.length > 0;
+        const hasProblems = positions.filter(p => p && (p.statusCategory === 'warning' || p.statusCategory === 'notallowed' || p.isTextPosition)).length > 0;
         const resultsEl = document.getElementById('results');
         const emptyEl = document.getElementById('emptyState');
         
@@ -369,7 +361,6 @@ function displaySessionStats(session, problemCodes) {
  * Отображение унифицированных результатов (если используется)
  */
 export function displayUnifiedResults(data) {
-    // ... (код без изменений, как ранее)
     if (!data) {
         console.warn('displayUnifiedResults: data is undefined');
         showError('Нет данных для отображения');
@@ -394,19 +385,12 @@ export function displayUnifiedResults(data) {
         updateState('lastSessionId', data.sessionId);
     }
     
-    const problemPositions = positions.filter(pos => {
-        if (!pos) return false;
-        if (pos.isTextPosition === true) return true;
-        return pos.statusCategory === 'warning' || 
-               pos.statusCategory === 'notallowed' || 
-               pos.statusCategory === 'text';
-    });
-    
-    updateState('currentResults', problemPositions);
+    // СОХРАНЯЕМ ВСЕ ПОЗИЦИИ
+    updateState('currentResults', positions);
     
     displayMrStats(positions, stats, totalMrAmount);
     
-    const hasProblems = problemPositions.length > 0;
+    const hasProblems = positions.filter(p => p && (p.statusCategory === 'warning' || p.statusCategory === 'notallowed' || p.isTextPosition)).length > 0;
     const resultsEl = document.getElementById('results');
     const emptyEl = document.getElementById('emptyState');
     

@@ -144,7 +144,7 @@ function parseKS2(fileBuffer, fileName = '') {
         const nameCol = 3;           // D - наименование
         const unitCol = 4;           // E - ед.изм.
         const quantityCol = 5;       // F - количество
-        const coeffCol = 8;          // I - коэффициент
+        const coeffCol = 7;          // I - коэффициент
         const totalCol = 10;         // K - сумма
         
         console.log(`\n📌 ИСПОЛЬЗУЕМЫЕ КОЛОНКИ:`);
