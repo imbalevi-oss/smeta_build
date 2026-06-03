@@ -83,7 +83,11 @@ export function switchCheckMode(mode) {
     }
 }
 
+// components/navigation.js - только функция initEventListeners
+
 export function initEventListeners() {
+    console.log('🔧 initEventListeners вызвана');
+    
     // Переключение вкладок
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => {
@@ -97,7 +101,7 @@ export function initEventListeners() {
                 switchToProjectsTab();
             } else if (tabName === 'workspace') {
                 if (AppState.currentProjectId && AppState.currentProject) {
-                    if (openProject) openProject(AppState.currentProjectId);
+                    if (window.openProject) window.openProject(AppState.currentProjectId);
                 } else {
                     showError('Сначала выберите проект из списка');
                     switchToProjectsTab();
@@ -108,11 +112,37 @@ export function initEventListeners() {
     
     // Кнопка анализа сметы
     const analyzeEstimateBtn = document.getElementById('analyzeEstimateBtn');
-    if (analyzeEstimateBtn) analyzeEstimateBtn.addEventListener('click', analyzeEstimate);
+    if (analyzeEstimateBtn) {
+        analyzeEstimateBtn.addEventListener('click', () => {
+            if (window.uploadNewVersionToProject) window.uploadNewVersionToProject();
+        });
+    }
     
     // Кнопка анализа КС-2
     const analyzeKs2Btn = document.getElementById('analyzeKs2Btn');
-    if (analyzeKs2Btn) analyzeKs2Btn.addEventListener('click', analyzeKs2);
+    if (analyzeKs2Btn) {
+        analyzeKs2Btn.addEventListener('click', () => {
+            if (window.analyzeKs2) window.analyzeKs2();
+        });
+    }
+    
+    // ✅ КНОПКА СРАВНЕНИЯ
+    const compareBtn = document.getElementById('compareBtn');
+    if (compareBtn) {
+        console.log('🔘 Кнопка сравнения найдена, добавляем обработчик');
+        compareBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            console.log('🖱️ Кнопка сравнения нажата');
+            if (typeof window.compareEstimateWithKs2 === 'function') {
+                window.compareEstimateWithKs2();
+            } else {
+                console.error('❌ window.compareEstimateWithKs2 не функция, тип:', typeof window.compareEstimateWithKs2);
+                showError('Функция сравнения не загружена. Обновите страницу.');
+            }
+        });
+    } else {
+        console.warn('⚠️ Кнопка сравнения #compareBtn не найдена в DOM');
+    }
     
     // Зона сметы
     const fileInput = document.getElementById('fileInput');
@@ -120,21 +150,19 @@ export function initEventListeners() {
     if (dropArea && fileInput) {
         const stopPropagation = (e) => { e.preventDefault(); e.stopPropagation(); };
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(ev => dropArea.addEventListener(ev, stopPropagation));
-        ['dragenter', 'dragover'].forEach(ev => dropArea.addEventListener(ev, () => dropArea.classList.add('drag-over')));
-        ['dragleave', 'drop'].forEach(ev => dropArea.addEventListener(ev, () => dropArea.classList.remove('drag-over')));
         dropArea.addEventListener('drop', (e) => {
             const files = e.dataTransfer.files;
             if (files.length > 0) {
                 updateState('currentFile', files[0]);
                 if (fileInput) fileInput.files = files;
-                updateFileDisplay();
+                if (window.updateFileDisplay) window.updateFileDisplay();
             }
         });
         dropArea.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', () => {
             if (fileInput.files && fileInput.files.length > 0) {
                 updateState('currentFile', fileInput.files[0]);
-                updateFileDisplay();
+                if (window.updateFileDisplay) window.updateFileDisplay();
             }
         });
     }
@@ -145,15 +173,13 @@ export function initEventListeners() {
     if (ks2Area && ks2Input) {
         const stopPropagation = (e) => { e.preventDefault(); e.stopPropagation(); };
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(ev => ks2Area.addEventListener(ev, stopPropagation));
-        ['dragenter', 'dragover'].forEach(ev => ks2Area.addEventListener(ev, () => ks2Area.classList.add('drag-over')));
-        ['dragleave', 'drop'].forEach(ev => ks2Area.addEventListener(ev, () => ks2Area.classList.remove('drag-over')));
         ks2Area.addEventListener('drop', (e) => {
             const files = e.dataTransfer.files;
             if (files.length > 0) {
                 const newFiles = [...AppState.ks2Files];
                 for (const file of files) newFiles.push(file);
                 updateState('ks2Files', newFiles);
-                updateKs2Display();
+                if (window.updateKs2Display) window.updateKs2Display();
             }
         });
         ks2Area.addEventListener('click', (e) => {
@@ -166,20 +192,22 @@ export function initEventListeners() {
                 const newFiles = [...AppState.ks2Files];
                 for (const file of ks2Input.files) newFiles.push(file);
                 updateState('ks2Files', newFiles);
-                updateKs2Display();
+                if (window.updateKs2Display) window.updateKs2Display();
                 ks2Input.value = '';
             }
         });
     }
     
-    // Модальное окно проекта
+    // Модальное окно
     const newProjectModal = document.getElementById('newProjectModal');
     if (newProjectModal) {
         newProjectModal.addEventListener('click', (e) => {
             if (e.target === newProjectModal && window.closeNewProjectModal) window.closeNewProjectModal();
         });
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && newProjectModal.style.display === 'flex' && window.closeNewProjectModal) window.closeNewProjectModal();
+            if (e.key === 'Escape' && newProjectModal.style.display === 'flex' && window.closeNewProjectModal) {
+                window.closeNewProjectModal();
+            }
         });
     }
     
@@ -187,9 +215,28 @@ export function initEventListeners() {
     const resetBtn = document.getElementById('resetBtn');
     const fullReportBtn = document.getElementById('fullReportBtn');
     const excelReportBtn = document.getElementById('excelReportBtn');
-    if (resetBtn) resetBtn.addEventListener('click', () => { if (window.resetWorkspace) window.resetWorkspace(); });
-    if (fullReportBtn) fullReportBtn.addEventListener('click', () => { if (window.generateFullReport) window.generateFullReport(); });
-    if (excelReportBtn) excelReportBtn.addEventListener('click', () => { if (window.downloadExcelReport) window.downloadExcelReport(); });
+    
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => { 
+            if (window.resetWorkspace) window.resetWorkspace(); 
+        });
+    }
+    if (fullReportBtn) {
+        fullReportBtn.addEventListener('click', () => { 
+            if (window.generateFullReport) window.generateFullReport(); 
+        });
+    }
+    if (excelReportBtn) {
+        excelReportBtn.addEventListener('click', () => { 
+            if (AppState.currentResultsType === 'ks2') {
+                if (window.exportKs2ToExcel) window.exportKs2ToExcel();
+            } else if (AppState.currentResultsType === 'comparison') {
+                if (window.exportComparisonToExcel) window.exportComparisonToExcel();
+            } else {
+                if (window.downloadExcelReport) window.downloadExcelReport();
+            }
+        });
+    }
     
     // Фильтры проектов
     document.querySelectorAll('.project-filter-chip').forEach(chip => {
@@ -201,11 +248,25 @@ export function initEventListeners() {
     
     // Режим проверки
     const modeUniversal = document.getElementById('modeUniversal');
-    if (modeUniversal) modeUniversal.addEventListener('click', () => { if (window.switchCheckMode) window.switchCheckMode('universal'); });
+    if (modeUniversal) {
+        modeUniversal.addEventListener('click', () => { 
+            if (window.switchCheckMode) window.switchCheckMode('universal'); 
+        });
+    }
     
-    // Логин
+    // Логин по Enter
     const loginUsername = document.getElementById('loginUsername');
     const loginPassword = document.getElementById('loginPassword');
-    if (loginUsername) loginUsername.addEventListener('keypress', (e) => { if (e.key === 'Enter' && window.login) window.login(); });
-    if (loginPassword) loginPassword.addEventListener('keypress', (e) => { if (e.key === 'Enter' && window.login) window.login(); });
+    if (loginUsername) {
+        loginUsername.addEventListener('keypress', (e) => { 
+            if (e.key === 'Enter' && window.login) window.login(); 
+        });
+    }
+    if (loginPassword) {
+        loginPassword.addEventListener('keypress', (e) => { 
+            if (e.key === 'Enter' && window.login) window.login(); 
+        });
+    }
+    
+    console.log('✅ initEventListeners завершена');
 }

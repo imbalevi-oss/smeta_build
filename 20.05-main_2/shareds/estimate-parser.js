@@ -320,7 +320,7 @@ function isPureText(str) {
 
 function parseFullEstimate(fileBuffer) {
     console.log('\n' + '='.repeat(70));
-    console.log('🔍 FULL ESTIMATE PARSER - УЛУЧШЕННАЯ ВЕРСИЯ');
+    console.log('🔍 FULL ESTIMATE PARSER - ДИАГНОСТИЧЕСКАЯ ВЕРСИЯ');
     console.log('='.repeat(70));
 
     try {
@@ -347,6 +347,10 @@ function parseFullEstimate(fileBuffer) {
         console.log(`\n📊 Определённые колонки:`);
         console.log(`   Позиция: ${positionCol+1} (${String.fromCharCode(65+positionCol)})`);
         console.log(`   Код: ${codeCol+1} (${String.fromCharCode(65+codeCol)})`);
+        console.log(`   Наименование: ${nameCol+1} (${String.fromCharCode(65+nameCol)})`);
+        console.log(`   Ед.изм.: ${unitCol+1} (${String.fromCharCode(65+unitCol)})`);
+        console.log(`   Кол-во: ${quantityCol+1} (${String.fromCharCode(65+quantityCol)})`);
+        console.log(`   Цена: ${priceCol+1} (${String.fromCharCode(65+priceCol)})`);
         console.log(`   Коэффициент: ${coeffCol+1} (${String.fromCharCode(65+coeffCol)})`);
         console.log(`   Сумма: ${amountCol+1} (${String.fromCharCode(65+amountCol)})`);
         console.log(`   Начало данных: строка ${startRow+1}`);
@@ -368,7 +372,13 @@ function parseFullEstimate(fileBuffer) {
             if (!extractedCode && !isTextPos) { i++; continue; }
 
             positionCounter++;
+
+            // ========== ДИАГНОСТИКА КОЭФФИЦИЕНТА ==========
+            const coeffCellRaw = row[coeffCol];
+            const coeffValue = parseNumber(coeffCellRaw);
             console.log(`\n📍 Позиция ${positionCounter} (строка ${i+1})`);
+            console.log(`   📊 Коэффициент: колонка ${coeffCol+1} = "${coeffCellRaw}" -> parseNumber = ${coeffValue} (${typeof coeffValue})`);
+            // =============================================
 
             // Собираем все детали (строки, идущие следом, пока не появится новая позиция)
             let details = [];
@@ -407,8 +417,8 @@ function parseFullEstimate(fileBuffer) {
             const unit = row[unitCol] ? String(row[unitCol]).trim() : '';
             const quantity = parseNumber(row[quantityCol]);
             const price = parseNumber(row[priceCol]);
-            const coefficient = parseNumber(row[coeffCol]);
-            const finalCoeff = (coefficient !== 0 && coefficient !== 1) ? coefficient : null;
+            // Используем уже вычисленный coeffValue (не парсим повторно)
+            const finalCoeff = (coeffValue !== 0 && coeffValue !== 1) ? coeffValue : null;
 
             const amountFromRow = parseNumber(row[amountCol]);
             const sumDetails = details.reduce((s, d) => s + d.amount, 0);
@@ -417,31 +427,37 @@ function parseFullEstimate(fileBuffer) {
             // Объём
             const volume = calculateVolume(quantity, unit);
             const formattedVolume = formatVolume(volume, unit);
-
+console.log(`🔍 [DEBUG] Позиция ${positionCounter}: quantity=${quantity}, unit="${unit}", volume=${volume}, formatted="${formattedVolume}"`);
             // Детали только МР (для обратной совместимости с фронтендом)
             const mrDetails = details.filter(d => isMR(d.type));
             const mrTotalAmount = mrDetails.reduce((s, d) => s + d.amount, 0);
 
-            positions.push({
-                positionNumber: positionNumber,
-                code: codeRaw,
-                extractedCode: extractedCode,
-                name: name,
-                unit: unit,
-                quantity: quantity,
-                price: price,
-                coefficient: finalCoeff,
-                volume: volume,
-                formattedVolume: formattedVolume,
-                totalAmount: totalAmount,
-                amountFromRow: amountFromRow,
-                details: details,           // все детали (ЗП, ЭМ, МР, НР, СП, ...)
-                mrDetails: mrDetails,
-                mrTotalAmount: mrTotalAmount,
-                sumAllDetails: sumDetails,
-                isTextPosition: isTextPos,
-                hasDetails: details.length > 0
-            });
+      // shareds/estimate-parser.js
+// В parseFullEstimate() внутри positions.push()
+
+positions.push({
+    positionNumber: positionNumber,
+    code: codeRaw,
+    extractedCode: extractedCode,
+    name: name,
+    unit: unit,
+    quantity: quantity,
+    price: price,                          // ✅ цена
+    coefficient: finalCoeff,
+    volume: volume,                        // ✅ числовой объём
+    formattedVolume: formattedVolume,      // ✅ отформатированный объём
+    totalAmount: totalAmount,
+    amountFromRow: amountFromRow,
+    details: details,
+    mrDetails: mrDetails,
+    mrTotalAmount: mrTotalAmount,
+    sumAllDetails: sumDetails,
+    isTextPosition: isTextPos,
+    hasDetails: details.length > 0,
+    // Добавляем для БД
+    positionName: name,                    // ✅ наименование
+    fileName: null                         // будет передан позже
+});
 
             i = j;
         }
@@ -489,6 +505,15 @@ function parseFullEstimate(fileBuffer) {
  */
 function parseEstimate(fileBuffer, originalName) {
     const result = parseFullEstimate(fileBuffer);
+     console.log('🔍 parseEstimate: проверка первой позиции');
+    if (result.positions && result.positions.length > 0) {
+        const first = result.positions[0];
+        console.log('  quantity:', first.quantity);
+        console.log('  unit:', first.unit);
+        console.log('  price:', first.price);
+        console.log('  volume:', first.volume);
+        console.log('  formattedVolume:', first.formattedVolume);
+    }
     if (!result.success) {
         return {
             success: false,
@@ -500,22 +525,23 @@ function parseEstimate(fileBuffer, originalName) {
             detectedColumns: { position: 0, code: 1, amount: 9, coefficient: 6 }
         };
     }
-    const items = result.positions.map(pos => ({
-        positionNumber: pos.positionNumber,
-        code: pos.code,
-        name: pos.name,
-        totalAmount: pos.totalAmount,
-        quantity: pos.quantity,
-        unit: pos.unit,
-        coefficient: pos.coefficient,
-        isTextPosition: pos.isTextPosition,
-        details: pos.details,
-        mrDetails: pos.mrDetails,
-        mrTotalAmount: pos.mrTotalAmount,
-        volume: pos.volume,
-        formattedVolume: pos.formattedVolume,
-        rowNumber: pos.rowNumber
-    }));
+const items = result.positions.map(pos => ({
+    positionNumber: pos.positionNumber,
+    code: pos.code,
+    name: pos.name,
+    totalAmount: pos.totalAmount,
+    quantity: pos.quantity,           // ← должно быть
+    unit: pos.unit,                   // ← должно быть
+    coefficient: pos.coefficient,
+    isTextPosition: pos.isTextPosition,
+    details: pos.details,
+    mrDetails: pos.mrDetails,
+    mrTotalAmount: pos.mrTotalAmount,
+    volume: pos.volume,               // ← ДОБАВИТЬ!
+    formattedVolume: pos.formattedVolume, // ← ДОБАВИТЬ!
+    price: pos.price,                 // ← ДОБАВИТЬ!
+    rowNumber: pos.rowNumber
+}));
     return {
         success: true,
         items: items,

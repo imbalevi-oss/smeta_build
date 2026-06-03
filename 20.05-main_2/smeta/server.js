@@ -39,7 +39,8 @@ app.use('/api', require('./routes/auth'));
 app.use('/api', require('./routes/analyze'));
 app.use('/api', require('./routes/projects'));
 app.use('/api', require('./routes/reports'));
-
+// server.js - убедитесь, что эта строка есть
+app.use('/api', require('./routes/compare'));
 // Корневой маршрут
 app.get('/', (req, res) => {
     res.sendFile(path.join(publicDir, 'analyzer.html'));

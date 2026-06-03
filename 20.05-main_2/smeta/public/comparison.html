@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сравнение сметы и КС-2</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            color: white;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: rgba(255,255,255,0.8);
+            font-size: 16px;
+        }
+
+        .upload-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .upload-card {
+            background: white;
+            border-radius: 24px;
+            padding: 40px;
+            text-align: center;
+            border: 2px dashed #e2e8f0;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
+        }
+
+        .upload-card:hover {
+            border-color: #667eea;
+            transform: translateY(-4px);
+            box-shadow: 0 20px 30px -10px rgba(0,0,0,0.15);
+        }
+
+        .upload-card.has-file {
+            border-color: #10b981;
+            background: #f0fdf4;
+        }
+
+        .upload-icon {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+        }
+
+        .upload-icon i {
+            font-size: 36px;
+            color: #667eea;
+        }
+
+        .upload-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 8px;
+        }
+
+        .upload-subtitle {
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        .file-name {
+            margin-top: 12px;
+            padding: 8px 12px;
+            background: #f3f4f6;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #374151;
+            display: inline-block;
+        }
+
+        /* Список файлов КС-2 */
+        .ks2-file-list {
+            margin-top: 16px;
+            max-height: 150px;
+            overflow-y: auto;
+            border-top: 1px solid #e5e7eb;
+            padding-top: 12px;
+        }
+
+        .ks2-file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: #f9fafb;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .ks2-file-item:hover {
+            background: #f3f4f6;
+        }
+
+        .ks2-file-remove {
+            background: none;
+            border: none;
+            color: #ef4444;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .ks2-file-remove:hover {
+            background: #fee2e2;
+        }
+
+        .compare-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border: none;
+            border-radius: 16px;
+            color: white;
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        .compare-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.4);
+        }
+
+        .compare-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .reset-btn {
+            background: #6b7280;
+            margin-bottom: 0;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .results-card {
+            background: white;
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+            display: none;
+            margin-top: 30px;
+        }
+
+        .results-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 24px;
+            color: white;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            padding: 24px;
+            background: #f9fafb;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 16px;
+            text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 800;
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: #6b7280;
+            margin-top: 8px;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            padding: 24px;
+        }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .comparison-table th {
+            padding: 14px;
+            text-align: left;
+            background: #f3f4f6;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 2px solid #e5e7eb;
+            position: sticky;
+            top: 0;
+        }
+
+        .comparison-table td {
+            padding: 14px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .badge-match { background: #d1fae5; color: #065f46; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; display: inline-block; }
+        .badge-only-estimate { background: #fed7aa; color: #92400e; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; display: inline-block; }
+        .badge-only-ks2 { background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; display: inline-block; }
+
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(4px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .export-btn {
+            background: #3b82f6;
+            padding: 12px 24px;
+            border-radius: 12px;
+            border: none;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin: 20px;
+        }
+
+        .back-btn {
+            background: #6b7280;
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            padding: 10px 20px;
+            border-radius: 12px;
+            border: none;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            z-index: 100;
+        }
+
+        .back-btn:hover { background: #4b5563; }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-btn"><i class="fas fa-arrow-left"></i> Назад</a>
+
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-balance-scale"></i> Сравнение сметы и КС-2</h1>
+            <p>Загрузите файл сметы и один или несколько файлов КС-2 для сравнения шифров расценок, объёмов и сумм</p>
+        </div>
+
+        <div class="upload-grid">
+            <!-- Смета -->
+            <div id="estimateArea" class="upload-card">
+                <input type="file" id="estimateFile" accept=".xlsx,.xls" style="display: none;">
+                <div class="upload-icon"><i class="fas fa-file-invoice"></i></div>
+                <div class="upload-title">Смета</div>
+                <div class="upload-subtitle">Нажмите или перетащите файл</div>
+                <div id="estimateFileName" class="file-name" style="display: none;"></div>
+            </div>
+
+            <!-- КС-2 (несколько файлов) -->
+            <div id="ks2Area" class="upload-card">
+                <input type="file" id="ks2Input" accept=".xlsx,.xls" multiple style="display: none;">
+                <div class="upload-icon"><i class="fas fa-file-alt"></i></div>
+                <div class="upload-title">Акты КС-2</div>
+                <div class="upload-subtitle">Нажмите или перетащите файлы (можно несколько)</div>
+                <div id="ks2FileList" class="ks2-file-list"></div>
+            </div>
+        </div>
+
+        <div class="btn-group">
+            <button id="compareBtn" class="compare-btn" disabled>
+                <i class="fas fa-chart-line"></i> Сравнить
+            </button>
+            <button id="resetBtn" class="compare-btn reset-btn">
+                <i class="fas fa-trash-alt"></i> Очистить всё
+            </button>
+        </div>
+
+        <div id="resultsCard" class="results-card" style="display: none;">
+            <div class="results-header">
+                <h2><i class="fas fa-chart-bar"></i> Результаты сравнения</h2>
+                <div id="ks2FilesInfo" style="font-size: 12px; margin-top: 8px; opacity: 0.9;"></div>
+            </div>
+            <div id="totalStatsContainer" class="stats-grid" style="margin-bottom: 0;"></div>
+            <div class="stats-grid" id="statsContainer"></div>
+            <div class="table-wrapper">
+                <table class="comparison-table" id="comparisonTable">
+                    <thead>
+                        <tr>
+                            <th>п/п по смете</th>
+                            <th>п/п по КС</th>
+                            <th>Шифр</th>
+                            <th>Наименование</th>
+                            <th>Смета (объём)</th>
+                            <th>КС-2 (объём)</th>
+                            <th>Отклонение объёма</th>
+                            <th>Смета, ₽</th>
+                            <th>КС-2, ₽</th>
+                            <th>Анализ суммы</th>
+                            <th>Статус</th>
+                        </tr>
+                    </thead>
+                    <tbody id="comparisonBody"></tbody>
+                </table>
+            </div>
+            <div style="text-align: center;">
+                <button id="exportExcelBtn" class="export-btn">
+                    <i class="fas fa-file-excel"></i> Экспорт в Excel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading" class="loading-overlay">
+        <div class="loading-spinner"></div>
+    </div>
+
+    <script type="module">
+        import { showLoading, hideLoading, showError, showSuccess } from './modules/ui-notifications.js';
+
+        let estimateFile = null;
+        let ks2Files = [];
+
+        // Элементы DOM
+        const estimateArea = document.getElementById('estimateArea');
+        const ks2Area = document.getElementById('ks2Area');
+        const estimateInput = document.getElementById('estimateFile');
+        const ks2Input = document.getElementById('ks2Input');
+        const estimateFileName = document.getElementById('estimateFileName');
+        const ks2FileList = document.getElementById('ks2FileList');
+        const compareBtn = document.getElementById('compareBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const resultsCard = document.getElementById('resultsCard');
+        const exportExcelBtn = document.getElementById('exportExcelBtn');
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function updateEstimateDisplay() {
+            if (estimateFile) {
+                estimateArea.classList.add('has-file');
+                estimateFileName.textContent = estimateFile.name;
+                estimateFileName.style.display = 'inline-block';
+            } else {
+                estimateArea.classList.remove('has-file');
+                estimateFileName.style.display = 'none';
+                estimateFileName.textContent = '';
+            }
+            compareBtn.disabled = !(estimateFile && ks2Files.length > 0);
+        }
+
+        function updateKs2Display() {
+            if (ks2Files.length > 0) {
+                ks2Area.classList.add('has-file');
+                ks2FileList.innerHTML = ks2Files.map((file, idx) => `
+                    <div class="ks2-file-item">
+                        <span><i class="fas fa-file-excel"></i> ${escapeHtml(file.name)}</span>
+                        <button class="ks2-file-remove" data-idx="${idx}"><i class="fas fa-times"></i></button>
+                    </div>
+                `).join('');
+                
+                document.querySelectorAll('.ks2-file-remove').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const idx = parseInt(btn.dataset.idx);
+                        ks2Files.splice(idx, 1);
+                        updateKs2Display();
+                        updateEstimateDisplay();
+                    });
+                });
+            } else {
+                ks2Area.classList.remove('has-file');
+                ks2FileList.innerHTML = '';
+            }
+            compareBtn.disabled = !(estimateFile && ks2Files.length > 0);
+        }
+
+        function setupDropZone(area, input, isMultiple, onFilesSelect) {
+            area.addEventListener('click', () => input.click());
+            input.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    onFilesSelect(Array.from(e.target.files));
+                }
+            });
+            area.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                area.style.borderColor = '#667eea';
+            });
+            area.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                area.style.borderColor = '#e2e8f0';
+            });
+            area.addEventListener('drop', (e) => {
+                e.preventDefault();
+                area.style.borderColor = '#e2e8f0';
+                if (e.dataTransfer.files.length > 0) {
+                    onFilesSelect(Array.from(e.dataTransfer.files));
+                }
+            });
+        }
+
+        setupDropZone(estimateArea, estimateInput, false, (files) => {
+            estimateFile = files[0];
+            updateEstimateDisplay();
+            showSuccess(`Файл сметы выбран: ${estimateFile.name}`);
+        });
+
+        setupDropZone(ks2Area, ks2Input, true, (files) => {
+            ks2Files.push(...files);
+            updateKs2Display();
+            showSuccess(`Добавлено ${files.length} файлов КС-2. Всего: ${ks2Files.length}`);
+        });
+
+        async function compare() {
+            if (!estimateFile || ks2Files.length === 0) {
+                showError('Выберите смету и хотя бы один файл КС-2');
+                return;
+            }
+
+            showLoading();
+
+            const formData = new FormData();
+            formData.append('estimateFile', estimateFile);
+            for (const file of ks2Files) {
+                formData.append('ks2Files', file);
+            }
+
+            try {
+                const response = await fetch('/api/compare-files-multiple', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!data.success) {
+                    throw new Error(data.error || 'Ошибка сравнения');
+                }
+
+                displayResults(data);
+                showSuccess(`Сравнение завершено. Обработано ${data.ks2_count} файлов КС-2`);
+
+            } catch (err) {
+                console.error('Ошибка:', err);
+                showError(err.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+function displayResults(data) {
+    if (!data || !data.comparison) {
+        showError('Нет данных для отображения');
+        return;
+    }
+
+    // Информация о файлах КС-2
+    document.getElementById('ks2FilesInfo').innerHTML = `📄 Файлов КС-2: ${data.ks2_count} | ${data.ks2_names?.join(', ') || ''}`;
+
+    // Общая статистика по суммам
+    const totalStatsHtml = `
+        <div class="stat-card" style="background: ${data.stats.total_status === 'over' ? '#ef444410' : (data.stats.total_status === 'under_warning' ? '#f59e0b10' : '#10b98110')}; border: 1px solid ${data.stats.total_status === 'over' ? '#ef4444' : (data.stats.total_status === 'under_warning' ? '#f59e0b' : '#10b981')}30;">
+            <div class="stat-value" style="color: ${data.stats.total_status === 'over' ? '#ef4444' : (data.stats.total_status === 'under_warning' ? '#f59e0b' : '#10b981')}; font-size: 24px;">${data.stats.total_status_message}</div>
+            <div class="stat-label">
+                Смета: ${data.stats.total_estimate_sum.toLocaleString('ru-RU')} ₽ | 
+                КС-2: ${data.stats.total_ks2_sum.toLocaleString('ru-RU')} ₽
+            </div>
+        </div>
+    `;
+
+    const statsHtml = `
+        <div class="stat-card"><div class="stat-value" style="color: #3b82f6;">${data.stats.total_codes}</div><div class="stat-label">📋 Всего шифров</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: #10b981;">${data.stats.match_count}</div><div class="stat-label">✅ Совпадают</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: #f59e0b;">${data.stats.only_in_estimate}</div><div class="stat-label">⚠️ Только в смете</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: #ef4444;">${data.stats.only_in_ks2}</div><div class="stat-label">❌ Только в КС-2</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: #8b5cf6;">${data.stats.volume_match_count || 0}</div><div class="stat-label">📐 Объёмы совпадают</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: #ef4444;">${data.stats.volume_mismatch_count || 0}</div><div class="stat-label">⚠️ Объёмы различаются</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: #10b981;">${data.stats.exact_match_count || 0}</div><div class="stat-label">💰 Суммы совпадают</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: #ef4444;">${data.stats.over_estimate_count || 0}</div><div class="stat-label">🔴 КС-2 > Сметы</div></div>
+        <div class="stat-card"><div class="stat-value" style="color: #f59e0b;">${data.stats.under_estimate_count || 0}</div><div class="stat-label">⚠️ Смета дороже на 10%+</div></div>
+    `;
+    
+    document.getElementById('totalStatsContainer').innerHTML = totalStatsHtml;
+    document.getElementById('statsContainer').innerHTML = statsHtml;
+
+    // Таблица
+    let tableHtml = '';
+    for (const item of data.comparison) {
+        let statusHtml = '';
+        let volumeHtml = '';
+        let sumHtml = '';
+        
+        if (item.status === 'match') {
+            statusHtml = '<span class="badge-match">✅ Совпадает</span>';
+            
+            if (item.volume_status === 'exact') {
+                volumeHtml = '<span style="color: #10b981;">✓ Совпадает</span>';
+            } else if (item.volume_status === 'mismatch') {
+                const diff = item.volume_diff || 0;
+                const percent = item.volume_diff_percent || 0;
+                const sign = diff > 0 ? '+' : '';
+                volumeHtml = `<span style="color: #ef4444;">⚠️ ${sign}${diff.toFixed(2)} (${sign}${percent.toFixed(1)}%)</span>`;
+            } else {
+                volumeHtml = '<span style="color: #6b7280;">—</span>';
+            }
+            
+            if (item.sum_status === 'exact') {
+                sumHtml = '<span style="color: #10b981;">✓ Сумма совпадает</span>';
+            } else if (item.sum_status === 'over') {
+                sumHtml = `<span style="color: #ef4444; font-weight: 600;">🔴 ${item.sum_message}</span>`;
+            } else if (item.sum_status === 'under_warning') {
+                sumHtml = `<span style="color: #f59e0b; font-weight: 600;">⚠️ ${item.sum_message}</span>`;
+            } else {
+                sumHtml = `<span style="color: #3b82f6;">ℹ️ ${item.sum_message}</span>`;
+            }
+        } else if (item.status === 'only_in_estimate') {
+            statusHtml = '<span class="badge-only-estimate">⚠️ Только в смете</span>';
+            volumeHtml = '<span style="color: #f59e0b;">❌ Отсутствует в КС-2</span>';
+            sumHtml = '<span style="color: #f59e0b;">❌ Нет данных в КС-2</span>';
+        } else {
+            statusHtml = '<span class="badge-only-ks2">❌ Только в КС-2</span>';
+            volumeHtml = '<span style="color: #ef4444;">⚠️ Лишняя позиция</span>';
+            sumHtml = `<span style="color: #ef4444; font-weight: 600;">🔴 ЛИШНЯЯ СУММА: ${(item.ks2_total || 0).toLocaleString('ru-RU')} ₽</span>`;
+        }
+
+        const estimateVolume = item.estimate_volume_formatted || (item.estimate_volume ? item.estimate_volume.toLocaleString('ru-RU') : '—');
+        const ks2Volume = item.ks2_volume_formatted || (item.ks2_volume ? item.ks2_volume.toLocaleString('ru-RU') : '—');
+        const estimateAmount = item.estimate_total ? Number(item.estimate_total).toLocaleString('ru-RU') + ' ₽' : '—';
+        const ks2Amount = item.ks2_total ? Number(item.ks2_total).toLocaleString('ru-RU') + ' ₽' : '—';
+
+        tableHtml += `
+            <tr>
+                <td style="padding: 12px; white-space: nowrap;">
+                    <span class="position-badge" style="background: #e8f0fe; padding: 4px 10px; border-radius: 20px; font-size: 12px;">${escapeHtml(item.estimate_position_display)}</span>
+                </td>
+                <td style="padding: 12px; white-space: nowrap;">
+                    <span class="position-badge" style="background: #fef3c7; padding: 4px 10px; border-radius: 20px; font-size: 12px;">${escapeHtml(item.ks2_position_display)}</span>
+                </td>
+                <td style="padding: 12px;"><code style="font-family: monospace;">${escapeHtml(item.code)}</code></td>
+                <td style="padding: 12px;">${escapeHtml(item.name || '—')}</td>
+                <td style="padding: 12px;">${estimateVolume}</td>
+                <td style="padding: 12px;">${ks2Volume}</td>
+                <td style="padding: 12px;">${volumeHtml}</td>
+                <td style="padding: 12px; text-align: right;">${estimateAmount}</td>
+                <td style="padding: 12px; text-align: right;">${ks2Amount}</td>
+                <td style="padding: 12px;">${sumHtml}</td>
+                <td style="padding: 12px;">${statusHtml}</td>
+            </tr>
+        `;
+    }
+
+    document.getElementById('comparisonBody').innerHTML = tableHtml;
+    resultsCard.style.display = 'block';
+}
+        function reset() {
+            estimateFile = null;
+            ks2Files = [];
+            estimateInput.value = '';
+            ks2Input.value = '';
+            updateEstimateDisplay();
+            updateKs2Display();
+            resultsCard.style.display = 'none';
+            showSuccess('Все данные очищены');
+        }
+
+        async function exportToExcel() {
+            const items = [];
+            const rows = document.querySelectorAll('#comparisonBody tr');
+            for (const row of rows) {
+                const cells = row.querySelectorAll('td');
+                if (cells.length >= 9) {
+                    items.push({
+                        code: cells[0].textContent,
+                        name: cells[1].textContent,
+                        estimate_volume: cells[2].textContent,
+                        ks2_volume: cells[3].textContent,
+                        estimate_total: parseFloat(cells[5].textContent.replace(/[^0-9.-]/g, '')) || null,
+                        ks2_total: parseFloat(cells[6].textContent.replace(/[^0-9.-]/g, '')) || null,
+                        sum_message: cells[7].textContent,
+                        status: cells[8].textContent.includes('Совпадает') ? 'match' : 
+                                (cells[8].textContent.includes('смете') ? 'only_in_estimate' : 'only_in_ks2')
+                    });
+                }
+            }
+
+            if (items.length === 0) {
+                showError('Нет данных для экспорта');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/compare/export-excel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ items })
+                });
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `comparison_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+                showSuccess('Экспорт выполнен');
+            } catch (err) {
+                showError('Ошибка экспорта');
+            }
+        }
+
+        compareBtn.addEventListener('click', compare);
+        resetBtn.addEventListener('click', reset);
+        exportExcelBtn.addEventListener('click', exportToExcel);
+    </script>
+</body>
+</html>

@@ -111,6 +111,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
             console.log(`${'='.repeat(80)}`);
 
             const parseResult = parseEstimate(fileBuffer, originalName);
+            
             if (!parseResult.success) {
                 throw new Error(`Ошибка парсинга: ${parseResult.error}`);
             }
@@ -132,33 +133,56 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 const quantity = pos.quantity;
                 const unit = pos.unit;
                 const name = pos.name;
+                const volume = pos.volume;
+                const formattedVolume = pos.formattedVolume;
+                const price = pos.price;
 
                 const { code: extractedCode } = extractCodeFromString(codeRaw);
                 const isTextPosition = pos.isTextPosition || (!extractedCode && codeRaw && codeRaw.length > 0 && !/^\d/.test(codeRaw));
 
                 console.log(`\n🔍 Позиция ${positionNumber} (строка ${pos.rowNumber})`);
-                console.log(`   Исходный код: ${codeRaw.substring(0, 60)}`);
+                console.log(`   Исходный код: ${codeRaw?.substring(0, 60)}`);
                 console.log(`   Извлечённый код: ${extractedCode || '—'}`);
-                console.log(`   Сумма: ${totalAmount.toLocaleString('ru-RU')} ₽`);
+                console.log(`   Сумма: ${totalAmount?.toLocaleString('ru-RU') || 0} ₽`);
                 console.log(`   Коэффициент: ${actualCoefficient !== null ? actualCoefficient : '—'}`);
-                console.log(`   Объём: ${pos.formattedVolume || 'не задан'}`);
+                console.log(`   Объём: ${formattedVolume || 'не задан'}`);
+                console.log(`   Quantity: ${quantity}, Unit: ${unit}, Price: ${price}`);
 
                 // Текстовая позиция
                 if (isTextPosition) {
                     textCount++;
                     analyzedPositions.push({
-                        positionNumber, code: codeRaw, extractedCode: null, name,
-                        status: 'Обратите внимание', statusCategory: 'text', matchType: 'text',
+                        positionNumber: positionNumber,
+                        code: codeRaw,
+                        extractedCode: extractedCode,
+                        name: name,
+                        status: 'Обратите внимание',
+                        statusCategory: 'text',
+                        matchType: 'text',
                         description: '📝 Текстовая строка - цена поставщика',
-                        totalAmount, quantity, unit,
-                        actualCoefficient, expectedCoefficient: null, coefficientMatch: null,
-                        isText: true, isRestoration: false,
+                        totalAmount: totalAmount,
+                        quantity: quantity,
+                        unit: unit,
+                        price: price,
+                        actualCoefficient: actualCoefficient,
+                        expectedCoefficient: null,
+                        coefficientMatch: null,
+                        isText: true,
+                        isRestoration: false,
                         hasDetails: (pos.details && pos.details.length > 0) || false,
                         details: pos.details || [],
                         mrDetails: pos.mrDetails || [],
                         mrTotalAmount: pos.mrTotalAmount || 0,
-                        volume: pos.volume,
-                        formattedVolume: pos.formattedVolume
+                        volume: volume,
+                        formattedVolume: formattedVolume,
+                        hasComment: false,
+                        isDuplicate: false,
+                        duplicateCount: 0,
+                        hasCoefficient: (actualCoefficient !== null && actualCoefficient !== 1),
+                        coefficientType: 'none',
+                        rowNumber: pos.rowNumber,
+                        fileName: originalName,
+                        positionName: name
                     });
                     continue;
                 }
@@ -166,14 +190,35 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 if (!extractedCode) {
                     notFoundCount++;
                     analyzedPositions.push({
-                        positionNumber, code: codeRaw, extractedCode: null, name,
-                        status: 'НЕ НАЙДЕН', statusCategory: 'notfound', matchType: 'none',
+                        positionNumber: positionNumber,
+                        code: codeRaw,
+                        extractedCode: null,
+                        name: name,
+                        status: 'НЕ НАЙДЕН',
+                        statusCategory: 'notfound',
+                        matchType: 'none',
                         description: 'Не удалось извлечь код из строки',
-                        totalAmount, quantity, unit,
-                        actualCoefficient, expectedCoefficient: null, coefficientMatch: null,
-                        isText: false, isRestoration: false, hasDetails: false, details: [],
-                        volume: pos.volume,
-                        formattedVolume: pos.formattedVolume
+                        totalAmount: totalAmount,
+                        quantity: quantity,
+                        unit: unit,
+                        price: price,
+                        actualCoefficient: actualCoefficient,
+                        expectedCoefficient: null,
+                        coefficientMatch: null,
+                        isText: false,
+                        isRestoration: false,
+                        hasDetails: false,
+                        details: [],
+                        volume: volume,
+                        formattedVolume: formattedVolume,
+                        hasComment: false,
+                        isDuplicate: false,
+                        duplicateCount: 0,
+                        hasCoefficient: false,
+                        coefficientType: 'none',
+                        rowNumber: pos.rowNumber,
+                        fileName: originalName,
+                        positionName: name
                     });
                     continue;
                 }
@@ -197,14 +242,13 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                     expectedCoefficient = found.coefficient_value;
                 }
 
-                // === НОВАЯ ЛОГИКА ПРОВЕРКИ КОЭФФИЦИЕНТА ===
+                // Проверка коэффициента
                 const actual = actualCoefficient !== null ? parseFloat(actualCoefficient) : null;
                 const expected = expectedCoefficient ? parseFloat(expectedCoefficient) : null;
                 const TOLERANCE = 0.01;
 
                 if (actual !== null) {
                     if (actual < 1) {
-                        // Понижающий – не проблема
                         category = 'ok';
                         status = 'Доступен';
                         coefficientMatch = null;
@@ -215,7 +259,6 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                     } 
                     else if (actual === 1) {
                         if (expected && expected !== 1) {
-                            // Требуется коэффициент, но он не указан
                             category = 'warning';
                             status = 'Обратите внимание';
                             coefficientMatch = false;
@@ -225,26 +268,23 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                             description = `✅ Коэффициент 1 (норма)`;
                         }
                     } 
-                    else { // actual > 1
+                    else {
                         if (expected && expected !== 1) {
                             if (actual > expected + TOLERANCE) {
-                                // Превышение ожидаемого
                                 category = 'warning';
                                 status = 'Обратите внимание';
                                 coefficientMatch = false;
-                                description = `⚠️ Коэффициент ${actual.toFixed(3)} превышает допустимый (${expected.toFixed(3)}). Требуется обоснование.`;
+                                description = `⚠️ Коэффициент ${actual.toFixed(3)} превышает допустимый (${expected.toFixed(3)}).`;
                                 coefficientMismatches++;
                             } else if (Math.abs(actual - expected) <= TOLERANCE) {
                                 coefficientMatch = true;
                                 description = `✅ Коэффициент ${actual.toFixed(3)} соответствует норме (${expected.toFixed(3)})`;
                                 coefficientMatches++;
                             } else {
-                                // Фактический меньше ожидаемого, но всё ещё >1 – не warning
                                 coefficientMatch = null;
                                 description = `ℹ️ Коэффициент ${actual.toFixed(3)} ниже ожидаемого (${expected.toFixed(3)}), но допустим.`;
                             }
                         } else {
-                            // Ожидаемого нет, коэффициент >1 – warning
                             category = 'warning';
                             status = 'Обратите внимание';
                             coefficientMatch = false;
@@ -253,7 +293,6 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                         }
                     }
                 } else if (expected && expected !== 1) {
-                    // Коэффициент не указан, но требуется
                     category = 'warning';
                     status = 'Обратите внимание';
                     coefficientMatch = false;
@@ -261,7 +300,6 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                     coefficientMismatches++;
                 }
 
-                // Реставрационные работы
                 if (isRestoration) {
                     category = 'notallowed';
                     status = 'Нельзя применять';
@@ -274,23 +312,44 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 if (!found && category !== 'text') notFoundCount++;
 
                 analyzedPositions.push({
-                    positionNumber, code: codeRaw, extractedCode, name,
-                    status, statusCategory: category, matchType, description,
-                    totalAmount, quantity, unit,
-                    actualCoefficient, expectedCoefficient, coefficientMatch,
-                    isText: false, isRestoration,
+                    positionNumber: positionNumber,
+                    code: codeRaw,
+                    extractedCode: extractedCode,
+                    name: name,
+                    status: status,
+                    statusCategory: category,
+                    matchType: matchType,
+                    description: description,
+                    totalAmount: totalAmount,
+                    quantity: quantity,
+                    unit: unit,
+                    price: price,
+                    actualCoefficient: actualCoefficient,
+                    expectedCoefficient: expectedCoefficient,
+                    coefficientMatch: coefficientMatch,
+                    isText: false,
+                    isRestoration: isRestoration,
                     hasDetails: (pos.details && pos.details.length > 0) || false,
                     details: pos.details || [],
                     mrDetails: pos.mrDetails || [],
                     mrTotalAmount: pos.mrTotalAmount || 0,
-                    volume: pos.volume,
-                    formattedVolume: pos.formattedVolume
+                    volume: volume,
+                    formattedVolume: formattedVolume,
+                    hasComment: false,
+                    isDuplicate: false,
+                    duplicateCount: 0,
+                    hasCoefficient: (actualCoefficient !== null && actualCoefficient !== 1),
+                    coefficientType: 'none',
+                    rowNumber: pos.rowNumber,
+                    fileName: originalName,
+                    positionName: name
                 });
             }
 
-            // Сохранение сессии и ответ
+            // Сохранение сессии
             const user = await usersDb.getUserById(userId);
             const sessionId = Date.now() + '-' + Math.random().toString(36).substr(2, 8);
+            
             await logsDb.createSession(sessionId, {
                 user: { fullname: user.fullname, institution: user.institution },
                 ip: req.ip,
@@ -304,6 +363,20 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 status: 'completed',
                 project_id: projectId
             });
+
+            // ✅ СОХРАНЯЕМ ДЕТАЛИ КОДОВ
+            console.log(`\n💾 СОХРАНЯЕМ ДЕТАЛИ КОДОВ: ${analyzedPositions.length} позиций`);
+            console.log(`🔍 Первая позиция для сохранения:`, {
+                positionNumber: analyzedPositions[0]?.positionNumber,
+                quantity: analyzedPositions[0]?.quantity,
+                unit: analyzedPositions[0]?.unit,
+                volume: analyzedPositions[0]?.volume,
+                formattedVolume: analyzedPositions[0]?.formattedVolume,
+                totalAmount: analyzedPositions[0]?.totalAmount
+            });
+            
+            await logsDb.addCodeDetailsBatch(sessionId, analyzedPositions);
+            console.log(`✅ ДЕТАЛИ СОХРАНЕНЫ`);
 
             const totalMrAmount = parsedPositions.reduce((sum, p) => sum + (p.mrTotalAmount || 0), 0);
             const totalMrRows = parsedPositions.reduce((sum, p) => sum + (p.mrDetails?.length || 0), 0);
@@ -345,6 +418,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
         }
     });
 });
+
 
 // ==================== АНАЛИЗ КС-2 ====================
 /**

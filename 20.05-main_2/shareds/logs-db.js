@@ -247,86 +247,106 @@ async function updateSessionStatus(sessionId, status, totalAmount = null) {
         await run(`UPDATE sessions SET status = @p0, updated_at = DATEADD(hour, 3, GETUTCDATE()) WHERE session_id = @p1`, [status, sessionId]);
     }
 }
+// shareds/logs-db.js - ИСПРАВЛЕННАЯ ВЕРСИЯ
 
 async function addCodeDetailsBatch(sessionId, codes) {
-    if (!codes.length) return;
+    console.log(`🔍 addCodeDetailsBatch: sessionId=${sessionId}, codes.length=${codes?.length}`);
     
-    const BATCH_SIZE = 50;
-    const totalBatches = Math.ceil(codes.length / BATCH_SIZE);
+    if (!codes || codes.length === 0) {
+        console.log(`⚠️ Нет данных для сохранения`);
+        return 0;
+    }
     
-    let mainRowCount = 0;
+    let savedCount = 0;
+    let errorCount = 0;
     
-    for (let batch = 0; batch < totalBatches; batch++) {
-        const start = batch * BATCH_SIZE;
-        const end = Math.min(start + BATCH_SIZE, codes.length);
-        const batchCodes = codes.slice(start, end);
+    for (let i = 0; i < codes.length; i++) {
+        const c = codes[i];
         
-        const values = [];
-        const params = [];
-        let idx = 0;
-        
-        for (let i = 0; i < batchCodes.length; i++) {
-            const c = batchCodes[i];
+        try {
+            // Пропускаем, если нет кода и это не текстовая позиция
+            if (!c.extractedCode && !c.isText) {
+                console.log(`⏭️ Пропуск позиции ${c.positionNumber}: нет кода`);
+                continue;
+            }
             
             const hasPositionNumber = c.positionNumber && c.positionNumber !== '' && c.positionNumber !== 'null';
             const hasExtractedCode = c.extractedCode && c.extractedCode !== '' && c.extractedCode !== 'null';
             const isMainRow = (hasPositionNumber && hasExtractedCode && !c.isText) ? 1 : 0;
             
-            if (isMainRow === 1) {
-                mainRowCount++;
-            }
-            
-            const row = `(@p${idx}, @p${idx+1}, @p${idx+2}, @p${idx+3}, @p${idx+4}, @p${idx+5}, @p${idx+6}, @p${idx+7}, @p${idx+8}, @p${idx+9}, @p${idx+10}, @p${idx+11}, @p${idx+12}, @p${idx+13}, @p${idx+14}, @p${idx+15}, @p${idx+16}, @p${idx+17}, @p${idx+18}, @p${idx+19}, @p${idx+20}, @p${idx+21}, @p${idx+22}, @p${idx+23})`;
-            values.push(row);
-            
             let coeffMatchValue = 0;
             if (c.coefficientMatch === true) coeffMatchValue = 1;
             else if (c.coefficientMatch === false) coeffMatchValue = -1;
             
-            const actualCoeff = c.actualCoefficient !== undefined ? c.actualCoefficient : null;
-            const expectedCoeff = c.expectedCoefficient !== undefined ? c.expectedCoefficient : null;
+            // Используем простой INSERT с явными параметрами
+            const sql = `
+                INSERT INTO code_details (
+                    session_id, position, row_number, position_number, code, extracted_code,
+                    status, match_type, matched_level, is_restoration, is_text, has_comment,
+                    is_duplicate, duplicate_count, has_coefficient, coefficient_type,
+                    coefficient_value, expected_coefficient, coefficient_match, description,
+                    is_main_row, total_amount, quantity, unit, price,
+                    volume, formatted_volume, position_name, file_name
+                ) VALUES (
+                    @p0, @p1, @p2, @p3, @p4, @p5,
+                    @p6, @p7, @p8, @p9, @p10, @p11,
+                    @p12, @p13, @p14, @p15,
+                    @p16, @p17, @p18, @p19,
+                    @p20, @p21, @p22, @p23, @p24,
+                    @p25, @p26, @p27, @p28
+                )
+            `;
             
-            params.push(
-                sessionId,
-                start + i + 1,
-                c.rowNumber || null,
-                c.positionNumber || null,
-                c.code || '',
-                c.extractedCode || '',
-                c.status || '',
-                c.matchType || 'none',
-                c.matchedLevel || 'none',
-                c.isRestoration ? 1 : 0,
-                c.isText ? 1 : 0,
-                c.hasComment ? 1 : 0,
-                c.isDuplicate ? 1 : 0,
-                c.duplicateCount || 0,
-                c.hasCoefficient ? 1 : 0,
-                c.coefficientType || 'none',
-                actualCoeff,
-                expectedCoeff,
-                coeffMatchValue,
-                c.description || null,
-                isMainRow,
-                c.totalAmount || c.total_amount || 0,
-                c.quantity || 0,
-                c.unit || ''
-            );
-            idx += 24;
+            const params = [
+                sessionId,                           // p0
+                i + 1,                               // p1 - position
+                c.rowNumber || null,                 // p2
+                c.positionNumber || null,            // p3
+                c.code || '',                        // p4
+                c.extractedCode || '',               // p5
+                c.status || '',                      // p6
+                c.matchType || 'none',               // p7
+                c.matchedLevel || 'none',            // p8
+                c.isRestoration ? 1 : 0,             // p9
+                c.isText ? 1 : 0,                   // p10
+                c.hasComment ? 1 : 0,               // p11
+                c.isDuplicate ? 1 : 0,              // p12
+                c.duplicateCount || 0,              // p13
+                c.hasCoefficient ? 1 : 0,           // p14
+                c.coefficientType || 'none',        // p15
+                c.actualCoefficient || null,        // p16
+                c.expectedCoefficient || null,      // p17
+                coeffMatchValue,                    // p18
+                c.description || null,              // p19
+                isMainRow,                          // p20
+                c.totalAmount || 0,                 // p21
+                c.quantity || 0,                    // p22
+                c.unit || '',                       // p23
+                c.price !== undefined ? c.price : null,  // p24
+                c.volume !== undefined ? c.volume : null, // p25
+                c.formattedVolume || null,          // p26
+                c.positionName || null,             // p27
+                c.fileName || null                  // p28
+            ];
+            
+            await run(sql, params);
+            savedCount++;
+            
+            if (i < 5) {
+                console.log(`✅ Сохранена позиция ${c.positionNumber}: qty=${c.quantity}, vol=${c.volume}, amount=${c.totalAmount}`);
+            }
+            
+        } catch (err) {
+            errorCount++;
+            console.error(`❌ Ошибка сохранения позиции ${c.positionNumber}:`, err.message);
+            if (i < 3) {
+                console.error(`   Данные: quantity=${c.quantity}, volume=${c.volume}, totalAmount=${c.totalAmount}`);
+            }
         }
-        
-        const sql = `INSERT INTO code_details (
-            session_id, position, row_number, position_number, code, extracted_code, 
-            status, match_type, matched_level, is_restoration, is_text, has_comment, 
-            is_duplicate, duplicate_count, has_coefficient, coefficient_type, 
-            coefficient_value, expected_coefficient, coefficient_match, description,
-            is_main_row, total_amount, quantity, unit
-        ) VALUES ${values.join(',')}`;
-        
-        await run(sql, params);
     }
     
-    console.log(`✅ Сохранено ${codes.length} записей для сессии ${sessionId} (${mainRowCount} основных позиций)`);
+    console.log(`📊 ИТОГ СОХРАНЕНИЯ: saved=${savedCount}, errors=${errorCount}, total=${codes.length}`);
+    return savedCount;
 }
 
 // ==================== ПРОЕКТЫ ====================
@@ -1337,6 +1357,8 @@ module.exports = {
     getProjectStats,
     getAllProjectsAdmin,
     getProjectSessions,
+    getOne,  // уже должно быть
+    query, 
     adminUpdateProjectStatus,
     adminDeleteProject
 };

@@ -1,7 +1,6 @@
-// analyzer.js - Главный файл
+// analyzer.js
 
-// Импорты модулей
-import { AppState, updateState, getState, resetState } from './modules/state.js';
+import { AppState, updateState, resetState } from './modules/state.js';
 import { 
     showLoading, hideLoading, showError, showSuccess, showLoginError 
 } from './modules/ui-notifications.js';
@@ -11,7 +10,7 @@ import {
     deleteProject, filterProjectsByStatus, viewSessionFromHistory, 
     showNewProjectModal, closeNewProjectModal, createNewProject, loadProjectHistory
 } from './modules/projects.js';
-import { updateFileDisplay, resetFile, resetWorkspace } from './modules/file-handler.js';
+import { updateFileDisplay, resetFile, resetWorkspace, updateKs2Display, resetKs2 } from './modules/file-handler.js';
 import { uploadNewVersionToProject, displayResultsFromSession, displayUnifiedResults, showEmptyState } from './modules/analysis.js';
 import { filterAndDisplayResults, renderUnifiedTable } from './modules/results-renderer.js';
 import { generateFullReport, downloadExcelReport } from './modules/reports.js';
@@ -19,8 +18,10 @@ import {
     switchToProjectsTab, switchToWorkspaceTab, backToProjects, 
     initFilters, switchCheckMode, initEventListeners 
 } from './components/navigation.js';
+import { analyzeKs2, exportKs2ToExcel } from './modules/analysis-ks2.js';
+import { compareEstimateWithKs2, exportComparisonToExcel } from './modules/comparison.js';
 
-// Экспорт функций в глобальную область
+// Глобальные функции
 window.login = login;
 window.logout = logout;
 window.selectProject = selectProject;
@@ -45,8 +46,14 @@ window.filterAndDisplayResults = filterAndDisplayResults;
 window.loadProjectHistory = loadProjectHistory;
 window.showEmptyState = showEmptyState;
 window.checkAuth = checkAuth;
+window.analyzeKs2 = analyzeKs2;
+window.exportKs2ToExcel = exportKs2ToExcel;
+window.compareEstimateWithKs2 = compareEstimateWithKs2;
+window.exportComparisonToExcel = exportComparisonToExcel;
+window.updateKs2Display = updateKs2Display;
+window.resetKs2 = resetKs2;
 
-// Функция для глобального доступа из HTML
+// Функция для раскрытия деталей
 window.togglePositionDetails = function(idx) {
     const detailsRow = document.getElementById(`details-row-${idx}`);
     const icon = document.getElementById(`toggle-icon-${idx}`);
@@ -64,8 +71,9 @@ window.togglePositionDetails = function(idx) {
     }
 };
 
-// Инициализация приложения
+// Инициализация
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 Приложение загружено');
     checkAuth();
     initFilters();
     initEventListeners();
