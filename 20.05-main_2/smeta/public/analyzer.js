@@ -21,6 +21,7 @@ import {
 import { analyzeKs2, exportKs2ToExcel } from './modules/analysis-ks2.js';
 import { compareEstimateWithKs2, exportComparisonToExcel } from './modules/comparison.js';
 
+
 // Глобальные функции
 window.login = login;
 window.logout = logout;
@@ -52,6 +53,10 @@ window.compareEstimateWithKs2 = compareEstimateWithKs2;
 window.exportComparisonToExcel = exportComparisonToExcel;
 window.updateKs2Display = updateKs2Display;
 window.resetKs2 = resetKs2;
+window.displayResultsFromSession = displayResultsFromSession;
+window.showEmptyState = showEmptyState;
+window.renderUnifiedTable = renderUnifiedTable;
+
 
 // Функция для раскрытия деталей
 window.togglePositionDetails = function(idx) {

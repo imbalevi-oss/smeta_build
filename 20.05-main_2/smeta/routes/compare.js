@@ -9,6 +9,35 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 
+// ==================== ЕДИНАЯ ФУНКЦИЯ ДЛЯ СОХРАНЕНИЯ ОРИГИНАЛЬНЫХ ИМЁН ====================
+function saveWithOriginalName(file) {
+    let originalName = file.originalname;
+    
+    if (/[Ðà-ÿ]/i.test(originalName) && !/[а-яА-ЯёЁ]/.test(originalName)) {
+        try {
+            const buffer = Buffer.from(originalName, 'latin1');
+            const decoded = buffer.toString('utf8');
+            if (/[а-яА-ЯёЁ]/.test(decoded)) {
+                originalName = decoded;
+            }
+        } catch(e) {}
+    }
+    
+    originalName = originalName.replace(/[<>:"|?*\\/]/g, '_');
+    
+    const timestamp = Date.now();
+    const ext = path.extname(originalName);
+    const nameWithoutExt = path.basename(originalName, ext);
+    return `${timestamp}-${nameWithoutExt}${ext}`;
+}
+
+function getOriginalDisplayName(filename) {
+    if (!filename) return '';
+    let name = path.basename(filename);
+    name = name.replace(/^\d+-/, '');
+    return name;
+}
+
 // ==================== МИДЛВАРЫ ====================
 function getUserId(req) {
     const userId = req.headers['x-user-id'];
@@ -29,7 +58,7 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
-    filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
+    filename: (req, file, cb) => cb(null, saveWithOriginalName(file))
 });
 
 const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } });
@@ -176,7 +205,7 @@ router.get('/compare/:projectId', requireAuth, async (req, res) => {
 
 /**
  * POST /api/compare-files
- * Сравнение двух файлов: смета и КС-2 (с объёмами и суммами)
+ * Сравнение двух файлов: смета и КС-2
  */
 router.post('/compare-files', upload.fields([
     { name: 'estimateFile', maxCount: 1 },
@@ -190,23 +219,24 @@ router.post('/compare-files', upload.fields([
             return res.status(400).json({ success: false, error: 'Загрузите оба файла' });
         }
 
+        const estimateDisplayName = getOriginalDisplayName(estimateFile.filename);
+        const ks2DisplayName = getOriginalDisplayName(ks2File.filename);
+
         console.log(`\n${'='.repeat(60)}`);
         console.log(`📊 СРАВНЕНИЕ ФАЙЛОВ`);
-        console.log(`   Смета: ${estimateFile.originalname}`);
-        console.log(`   КС-2: ${ks2File.originalname}`);
+        console.log(`   Смета: ${estimateDisplayName}`);
+        console.log(`   КС-2: ${ks2DisplayName}`);
         console.log(`${'='.repeat(60)}`);
 
-        // Парсим смету
         const estimateBuffer = fs.readFileSync(estimateFile.path);
-        const estimateResult = parseEstimate(estimateBuffer, estimateFile.originalname);
+        const estimateResult = parseEstimate(estimateBuffer, estimateDisplayName);
         
         if (!estimateResult.success) {
             throw new Error(`Ошибка парсинга сметы: ${estimateResult.error}`);
         }
 
-        // Парсим КС-2
         const ks2Buffer = fs.readFileSync(ks2File.path);
-        const ks2Result = parseKS2(ks2Buffer, ks2File.originalname);
+        const ks2Result = parseKS2(ks2Buffer, ks2DisplayName);
         
         if (!ks2Result.success) {
             throw new Error(`Ошибка парсинга КС-2: ${ks2Result.error}`);
@@ -215,7 +245,6 @@ router.post('/compare-files', upload.fields([
         console.log(`✅ Смета: ${estimateResult.items.length} позиций`);
         console.log(`✅ КС-2: ${ks2Result.items.length} позиций`);
 
-        // Собираем данные из сметы
         const estimateMap = new Map();
         for (const item of estimateResult.items) {
             const code = item.extractedCode || item.code;
@@ -235,7 +264,6 @@ router.post('/compare-files', upload.fields([
             }
         }
 
-        // Собираем данные из КС-2
         const ks2Map = new Map();
         for (const item of ks2Result.items) {
             const code = item.extracted_code || item.code;
@@ -255,7 +283,6 @@ router.post('/compare-files', upload.fields([
             }
         }
 
-        // Объединяем все уникальные коды
         const allCodes = new Set([...estimateMap.keys(), ...ks2Map.keys()]);
         
         const comparison = [];
@@ -279,7 +306,6 @@ router.post('/compare-files', upload.fields([
                 status = 'match';
                 matchCount++;
                 
-                // Сравнение объёмов
                 const estVol = estimate.volume || 0;
                 const ks2Vol = ks2.volume || 0;
                 totalEstimateSum += estimate.total;
@@ -297,7 +323,6 @@ router.post('/compare-files', upload.fields([
                     volumeDiffPercent = estVol > 0 ? (volumeDiff / estVol) * 100 : 0;
                 }
                 
-                // Сравнение сумм
                 const estTotal = estimate.total || 0;
                 const ks2Total = ks2.total || 0;
                 
@@ -357,7 +382,6 @@ router.post('/compare-files', upload.fields([
             });
         }
 
-        // Общая статистика по суммам
         const totalDiff = totalKs2Sum - totalEstimateSum;
         const totalDiffPercent = totalEstimateSum > 0 ? (totalDiff / totalEstimateSum) * 100 : 0;
         
@@ -380,7 +404,6 @@ router.post('/compare-files', upload.fields([
             }
         }
 
-        // Сортировка
         comparison.sort((a, b) => {
             const order = { 'only_in_estimate': 1, 'only_in_ks2': 2, 'match': 3 };
             return order[a.status] - order[b.status];
@@ -390,15 +413,11 @@ router.post('/compare-files', upload.fields([
         console.log(`   Совпадают по шифрам: ${matchCount}`);
         console.log(`   Только в смете: ${onlyInEstimate}`);
         console.log(`   Только в КС-2: ${onlyInKs2}`);
-        console.log(`   Объёмы совпадают: ${volumeMatchCount}`);
-        console.log(`   Объёмы не совпадают: ${volumeMismatchCount}`);
-        console.log(`   Суммы: превышений ${overEstimateCount}, занижений ${underEstimateCount}`);
         console.log(`   Общая сумма сметы: ${totalEstimateSum.toLocaleString('ru-RU')} ₽`);
         console.log(`   Общая сумма КС-2: ${totalKs2Sum.toLocaleString('ru-RU')} ₽`);
         console.log(`   ${totalStatusMessage}`);
         console.log(`${'='.repeat(60)}\n`);
 
-        // Удаляем временные файлы
         try {
             if (fs.existsSync(estimateFile.path)) fs.unlinkSync(estimateFile.path);
             if (fs.existsSync(ks2File.path)) fs.unlinkSync(ks2File.path);
@@ -406,8 +425,8 @@ router.post('/compare-files', upload.fields([
 
         res.json({
             success: true,
-            estimate_name: estimateFile.originalname,
-            ks2_name: ks2File.originalname,
+            estimate_name: estimateDisplayName,
+            ks2_name: ks2DisplayName,
             stats: {
                 total_codes: allCodes.size,
                 match_count: matchCount,
@@ -443,17 +462,10 @@ router.post('/compare-files', upload.fields([
         res.status(500).json({ success: false, error: err.message });
     }
 });
-// routes/compare.js - добавить новый маршрут
 
 /**
  * POST /api/compare-files-multiple
  * Сравнение сметы с несколькими файлами КС-2
- */
-// routes/compare.js - обновлённый маршрут POST /compare-files-multiple
-
-/**
- * POST /api/compare-files-multiple
- * Сравнение сметы с несколькими файлами КС-2 (с номерами позиций)
  */
 router.post('/compare-files-multiple', upload.fields([
     { name: 'estimateFile', maxCount: 1 },
@@ -467,21 +479,22 @@ router.post('/compare-files-multiple', upload.fields([
             return res.status(400).json({ success: false, error: 'Загрузите смету и хотя бы один файл КС-2' });
         }
 
+        const estimateDisplayName = getOriginalDisplayName(estimateFile.filename);
+        const ks2DisplayNames = ks2Files.map(f => getOriginalDisplayName(f.filename));
+
         console.log(`\n${'='.repeat(60)}`);
         console.log(`📊 СРАВНЕНИЕ СМЕТЫ С ${ks2Files.length} ФАЙЛАМИ КС-2`);
-        console.log(`   Смета: ${estimateFile.originalname}`);
-        ks2Files.forEach((f, i) => console.log(`   КС-2 ${i+1}: ${f.originalname}`));
+        console.log(`   Смета: ${estimateDisplayName}`);
+        ks2DisplayNames.forEach((name, i) => console.log(`   КС-2 ${i+1}: ${name}`));
         console.log(`${'='.repeat(60)}`);
 
-        // Парсим смету (с номерами позиций)
         const estimateBuffer = fs.readFileSync(estimateFile.path);
-        const estimateResult = parseEstimate(estimateBuffer, estimateFile.originalname);
+        const estimateResult = parseEstimate(estimateBuffer, estimateDisplayName);
         
         if (!estimateResult.success) {
             throw new Error(`Ошибка парсинга сметы: ${estimateResult.error}`);
         }
 
-        // Собираем данные из сметы с номерами позиций
         const estimateMap = new Map();
         for (const item of estimateResult.items) {
             const code = item.extractedCode || item.code;
@@ -503,17 +516,18 @@ router.post('/compare-files-multiple', upload.fields([
             }
         }
 
-        // Парсим все КС-2 (с номерами позиций)
         const ks2Map = new Map();
         const ks2Names = [];
 
-        for (const ks2File of ks2Files) {
+        for (let idx = 0; idx < ks2Files.length; idx++) {
+            const ks2File = ks2Files[idx];
+            const ks2DisplayName = ks2DisplayNames[idx];
             const ks2Buffer = fs.readFileSync(ks2File.path);
-            const ks2Result = parseKS2(ks2Buffer, ks2File.originalname);
+            const ks2Result = parseKS2(ks2Buffer, ks2DisplayName);
             
             if (ks2Result.success) {
-                ks2Names.push(ks2File.originalname);
-                console.log(`✅ ${ks2File.originalname}: ${ks2Result.items.length} позиций`);
+                ks2Names.push(ks2DisplayName);
+                console.log(`✅ ${ks2DisplayName}: ${ks2Result.items.length} позиций`);
                 
                 for (const item of ks2Result.items) {
                     const code = item.extracted_code || item.code;
@@ -522,7 +536,7 @@ router.post('/compare-files-multiple', upload.fields([
                             const existing = ks2Map.get(code);
                             existing.volume += item.volume || 0;
                             existing.total += item.total || 0;
-                            existing.files.push(ks2File.originalname);
+                            existing.files.push(ks2DisplayName);
                             existing.positionNumbers.push(item.ks2_position_number || item.position);
                         } else {
                             ks2Map.set(code, {
@@ -530,18 +544,17 @@ router.post('/compare-files-multiple', upload.fields([
                                 volume: item.volume || 0,
                                 volumeFormatted: item.volume ? `${item.volume} ${item.unit || ''}` : '',
                                 total: item.total || 0,
-                                files: [ks2File.originalname],
+                                files: [ks2DisplayName],
                                 positionNumbers: [item.ks2_position_number || item.position]
                             });
                         }
                     }
                 }
             } else {
-                console.log(`❌ Ошибка парсинга ${ks2File.originalname}: ${ks2Result.error}`);
+                console.log(`❌ Ошибка парсинга ${ks2DisplayName}: ${ks2Result.error}`);
             }
         }
 
-        // Объединяем все уникальные коды
         const allCodes = new Set([...estimateMap.keys(), ...ks2Map.keys()]);
         
         const comparison = [];
@@ -626,21 +639,17 @@ router.post('/compare-files-multiple', upload.fields([
             comparison.push({
                 code: code,
                 name: estimate?.name || ks2?.name || '',
-                // Номера позиций
                 estimate_position_numbers: estimate?.positionNumbers || [],
                 ks2_position_numbers: ks2?.positionNumbers || [],
                 estimate_position_display: estimate?.positionNumbers ? estimate.positionNumbers.join(', ') : '—',
                 ks2_position_display: ks2?.positionNumbers ? ks2.positionNumbers.join(', ') : '—',
-                // Объёмы
                 estimate_volume: estimate?.volume || 0,
                 estimate_volume_formatted: estimate?.volumeFormatted || '',
                 ks2_volume: ks2?.volume || 0,
                 ks2_volume_formatted: ks2?.volumeFormatted || '',
-                // Суммы
                 estimate_total: estimate?.total || null,
                 ks2_total: ks2?.total || null,
                 ks2_files: ks2?.files || [],
-                // Статусы
                 status: status,
                 volume_status: volumeStatus,
                 volume_diff: volumeDiff || 0,
@@ -650,7 +659,6 @@ router.post('/compare-files-multiple', upload.fields([
             });
         }
 
-        // Общая статистика по суммам
         const totalDiff = totalKs2Sum - totalEstimateSum;
         const totalDiffPercent = totalEstimateSum > 0 ? (totalDiff / totalEstimateSum) * 100 : 0;
         
@@ -673,7 +681,6 @@ router.post('/compare-files-multiple', upload.fields([
             }
         }
 
-        // Сортировка
         comparison.sort((a, b) => {
             const order = { 'only_in_estimate': 1, 'only_in_ks2': 2, 'match': 3 };
             return order[a.status] - order[b.status];
@@ -688,7 +695,6 @@ router.post('/compare-files-multiple', upload.fields([
         console.log(`   ${totalStatusMessage}`);
         console.log(`${'='.repeat(60)}\n`);
 
-        // Удаляем временные файлы
         try {
             if (fs.existsSync(estimateFile.path)) fs.unlinkSync(estimateFile.path);
             for (const f of ks2Files) {
@@ -698,7 +704,7 @@ router.post('/compare-files-multiple', upload.fields([
 
         res.json({
             success: true,
-            estimate_name: estimateFile.originalname,
+            estimate_name: estimateDisplayName,
             ks2_count: ks2Files.length,
             ks2_names: ks2Names,
             stats: {

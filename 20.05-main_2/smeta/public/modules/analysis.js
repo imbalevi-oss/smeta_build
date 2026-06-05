@@ -239,53 +239,83 @@ export async function uploadNewVersionToProject() {
     }
 }
 
+// public/modules/analysis.js
+
 export function displayResultsFromSession(session) {
     if (!session || !session.codes || !session.codes.length) {
-        const tableBody = document.getElementById('tableBody');
-        if (tableBody) {
-            tableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 60px;">Нет данных для отображения</td></tr>';
-        }
+        console.warn('displayResultsFromSession: нет данных для отображения');
+        showEmptyState();
         return;
     }
+
+    console.log('📊 displayResultsFromSession вызвана:', {
+        sessionId: session.session_id,
+        codesCount: session.codes.length,
+        sampleCode: session.codes[0]
+    });
 
     // Сохраняем в глобальное состояние
     updateState('currentResults', session.codes);
     updateState('lastSessionId', session.session_id);
+    updateState('currentResultsType', null);
+    updateState('detailedPositionsData', session.codes);
 
-    // Пересчитываем статусы строго по правилам клиентской фильтрации
-    const warningCount = session.codes.filter(c => c.category === 'warning').length;
-    const notAllowedCount = session.codes.filter(c => c.category === 'notallowed' || c.is_restoration).length;
-    const hasProblems = (warningCount + notAllowedCount) > 0;
+    // Подсчитываем проблемные позиции
+    const warningCount = session.codes.filter(c => 
+        c.statusCategory === 'warning' || 
+        c.coefficientMatch === false ||
+        (c.status === 'Обратите внимание' && !c.description?.includes('Понижающий'))
+    ).length;
+    
+    const notAllowedCount = session.codes.filter(c => 
+        c.statusCategory === 'notallowed' || 
+        c.isRestoration === true || 
+        c.is_restoration === 1 ||
+        c.status === 'Нельзя применять'
+    ).length;
+    
+    const textCount = session.codes.filter(c => 
+        c.statusCategory === 'text' || 
+        c.isText === true || 
+        c.is_text === 1 ||
+        c.matchType === 'text'
+    ).length;
+    
+    const hasProblems = (warningCount + notAllowedCount + textCount) > 0;
 
     // Формируем HTML статистики
     let statsHtml = `
-        <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr);">
-            <div class="stat-item">
-                <div class="stat-header">
-                    <span class="stat-label">⚠️ Требуют внимания</span>
-                    <i class="fas fa-exclamation-triangle" style="color: #f59e0b;"></i>
-                </div>
-                <div class="stat-value" style="color: #f59e0b;">${warningCount}</div>
+        <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:20px;padding:24px;margin-bottom:24px;">
+            <div style="color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+                📊 ИТОГОВАЯ СУММА
             </div>
-            <div class="stat-item">
-                <div class="stat-header">
-                    <span class="stat-label">❌ Нельзя применить</span>
-                    <i class="fas fa-ban" style="color: #ef4444;"></i>
-                </div>
-                <div class="stat-value" style="color: #ef4444;">${notAllowedCount}</div>
+            <div style="color:white;font-size:36px;font-weight:800;">
+                ${(session.total_amount || 0).toLocaleString('ru-RU')} ₽
+            </div>
+            <div style="color:rgba(255,255,255,0.6);font-size:12px;margin-top:8px;">
+                📋 Всего позиций: ${session.total_codes || session.codes.length}
+            </div>
+        </div>
+        
+        <div class="stats-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">
+            <div class="stat-item" style="background:white;border-radius:16px;padding:20px;text-align:center;">
+                <div style="font-size:28px;font-weight:800;color:#10b981;">${session.codes.filter(c => c.statusCategory === 'ok' && c.found !== false).length}</div>
+                <div style="font-size:12px;color:#6b7280;margin-top:4px;">✅ Доступны</div>
+            </div>
+            <div class="stat-item" style="background:white;border-radius:16px;padding:20px;text-align:center;">
+                <div style="font-size:28px;font-weight:800;color:#f59e0b;">${warningCount}</div>
+                <div style="font-size:12px;color:#6b7280;margin-top:4px;">⚠️ Требуют внимания</div>
+            </div>
+            <div class="stat-item" style="background:white;border-radius:16px;padding:20px;text-align:center;">
+                <div style="font-size:28px;font-weight:800;color:#ef4444;">${notAllowedCount}</div>
+                <div style="font-size:12px;color:#6b7280;margin-top:4px;">❌ Нельзя применять</div>
+            </div>
+            <div class="stat-item" style="background:white;border-radius:16px;padding:20px;text-align:center;">
+                <div style="font-size:28px;font-weight:800;color:#8b5cf6;">${textCount}</div>
+                <div style="font-size:12px;color:#6b7280;margin-top:4px;">📝 Цена поставщика</div>
             </div>
         </div>
     `;
-
-    // Итоговая сумма (если есть)
-    if (session.total_amount) {
-        statsHtml += `
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 20px; padding: 24px; text-align: center; margin-bottom: 24px;">
-                <div style="color: rgba(255,255,255,0.8); font-size: 13px; text-transform: uppercase; letter-spacing: 1px;">Итоговая сумма</div>
-                <div style="color: white; font-size: 36px; font-weight: 800;">${Number(session.total_amount).toLocaleString('ru-RU')} ₽</div>
-            </div>
-        `;
-    }
 
     // Обновляем DOM
     const statsEl = document.getElementById('stats');
@@ -298,7 +328,49 @@ export function displayResultsFromSession(session) {
         statsEl.style.display = 'block';
     }
 
-    if (!hasProblems) {
+    if (hasProblems) {
+        if (resultsEl) {
+            resultsEl.classList.remove('hidden');
+            resultsEl.style.display = 'block';
+        }
+        if (emptyStateEl) {
+            emptyStateEl.classList.add('hidden');
+            emptyStateEl.style.display = 'none';
+        }
+        
+        // ВАЖНО: Показываем ТОЛЬКО проблемные позиции, а не все
+        const problemPositions = session.codes.filter(c => {
+            if (!c) return false;
+            // Текстовая позиция
+            if (c.isText === true || c.is_text === 1 || c.matchType === 'text') return true;
+            // Запрещённая
+            if (c.status === 'Нельзя применять' || c.isRestoration === true || c.is_restoration === 1) return true;
+            // Требует внимания
+            if (c.status === 'Обратите внимание') return true;
+            // Коэффициент не совпадает
+            if (c.coefficientMatch === false) return true;
+            // Не найден
+            if (c.found === false && c.status !== 'Доступен') return true;
+            return false;
+        });
+        
+        console.log(`📊 Проблемных позиций: ${problemPositions.length} из ${session.codes.length}`);
+        
+        // Обновляем состояние и отображаем
+        updateState('currentResults', problemPositions);
+        updateState('currentFilter', 'warning');
+        
+        // Рендерим таблицу
+        if (window.filterAndDisplayResults) {
+            window.filterAndDisplayResults();
+        }
+        
+        // Активируем чип "warning"
+        document.querySelectorAll('.chip').forEach(chip => chip.classList.remove('active'));
+        const warningChip = document.querySelector('.chip[data-status="warning"]');
+        if (warningChip) warningChip.classList.add('active');
+        
+    } else {
         if (resultsEl) {
             resultsEl.classList.add('hidden');
             resultsEl.style.display = 'none';
@@ -314,31 +386,13 @@ export function displayResultsFromSession(session) {
                 <p style="color: #6b7280;">Все коды доступны для применения</p>
             `;
         }
-    } else {
-        if (resultsEl) {
-            resultsEl.classList.remove('hidden');
-            resultsEl.style.display = 'block';
-        }
-        if (emptyStateEl) {
-            emptyStateEl.classList.add('hidden');
-            emptyStateEl.style.display = 'none';
-        }
     }
 
-    // Показываем кнопки действий
+    // Показываем кнопки
     const fullReportBtn = document.getElementById('fullReportBtn');
     const resetBtn = document.getElementById('resetBtn');
     if (fullReportBtn) fullReportBtn.classList.remove('hidden');
     if (resetBtn) resetBtn.classList.remove('hidden');
-
-    // Устанавливаем фильтр «⚠️ Обратите внимание» и отображаем результаты
-    updateState('currentFilter', 'warning');
-    filterAndDisplayResults();
-
-    // Активируем чип «warning»
-    document.querySelectorAll('.chip').forEach(chip => chip.classList.remove('active'));
-    const warningChip = document.querySelector('.chip[data-status="warning"]');
-    if (warningChip) warningChip.classList.add('active');
 }
 
 function displaySessionStats(session, problemCodes) {

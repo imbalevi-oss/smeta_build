@@ -296,103 +296,87 @@ function renderDetailsBlock(details, totalAmount, idx) {
     `;
 }
 
+// public/modules/results-renderer.js
+
 export function renderUnifiedTable(positions) {
     const tableBody = document.getElementById('tableBody');
     if (!tableBody) return;
+    
     const safePositions = safeArray(positions);
+    
     if (safePositions.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:60px;color:#9ca3af;">✅ Проблемные позиции не найдены</td></tr>';
+        tableBody.innerHTML = '<td><td colspan="6" style="text-align:center;padding:60px;color:#9ca3af;">✅ Проблемные позиции не найдены</td></tr>';
         return;
     }
+    
     let html = '';
+    
     for (let idx = 0; idx < safePositions.length; idx++) {
         const pos = safePositions[idx];
         if (!pos) continue;
-        const totalCost = safeNumber(pos.totalAmount, 0);
+        
+        const totalCost = safeNumber(pos.total_amount || pos.totalAmount, 0);
         const positionNumber = pos.positionNumber || (idx + 1);
         const code = pos.code || '—';
-        const name = safeString(pos.name || pos.description || '', '').substring(0, 100);
-        const totalFormatted = totalCost.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const volumeDisplay = pos.formattedVolume || '';
-        const volumeHtml = volumeDisplay ? `<div style="font-size:11px; color:#059669; margin-top:4px;"><i class="fas fa-calculator"></i> ${volumeDisplay}</div>` : '';
         
-        let reason = getProblemReason(pos);
-        let statusColor = '#f59e0b';
-        let statusBg = '#fef3c7';
-        if (pos.isTextPosition || pos.isText) {
-            let messageText = '📝 Текстовая строка - цена поставщика';
-            if (pos.hasDetails && pos.sumAllDetails > 0) {
-                messageText = `📝 Текстовая позиция с детализацией: ${(pos.amountFromRow || 0).toLocaleString('ru-RU')} ₽ (строка) + ${(pos.sumAllDetails || 0).toLocaleString('ru-RU')} ₽ (детали) = ${totalCost.toLocaleString('ru-RU')} ₽`;
-            } else if (pos.amountFromRow > 0) {
-                messageText = `📝 Цена поставщика: ${totalCost.toLocaleString('ru-RU')} ₽`;
-            } else if (pos.sumAllDetails > 0) {
-                messageText = `📝 Цена поставщика (из деталей): ${totalCost.toLocaleString('ru-RU')} ₽`;
-            }
-            reason = {
-                severity: 'info',
-                type: 'text',
-                icon: '📝',
-                title: pos.hasDetails ? `Цена поставщика (${pos.details?.length || 0} дет.)` : 'Цена поставщика',
-                message: messageText
-            };
-            statusColor = '#8b5cf6';
-            statusBg = '#ede9fe';
-        } else if (reason.severity === 'error') {
-            statusColor = '#dc2626';
-            statusBg = '#fee2e2';
-        } else if (reason.severity === 'info') {
-            statusColor = '#3b82f6';
-            statusBg = '#dbeafe';
+        // ИСПРАВЛЕНИЕ: используем name (из сметы) вместо description (из БД)
+    const name = safeString(pos.name || pos.original_name || pos.position_name || pos.description || pos.code, '').substring(0, 100);
+        
+        const totalFormatted = totalCost.toLocaleString('ru-RU', { 
+            minimumFractionDigits: 2, 
+            maximumFractionDigits: 2 
+        });
+        
+        let statusHtml = '';
+        let reasonText = '';
+        
+        if (pos.isText || pos.isTextPosition) {
+            statusHtml = '<span class="badge badge-warning">📝 Цена поставщика</span>';
+            reasonText = pos.description || 'Текстовая строка, требуется проверка';
+        } else if (pos.status === 'Нельзя применять' || pos.isRestoration) {
+            statusHtml = '<span class="badge badge-danger">❌ Нельзя применять</span>';
+            reasonText = pos.description || 'Код запрещён к применению';
+        } else if (pos.coefficientMatch === false) {
+            statusHtml = '<span class="badge badge-warning">⚠️ Коэффициент завышен</span>';
+            reasonText = pos.description || `Коэффициент ${pos.actualCoefficient} превышает норму`;
+        } else if (pos.status === 'Обратите внимание') {
+            statusHtml = '<span class="badge badge-warning">⚠️ Требует внимания</span>';
+            reasonText = pos.description || 'Требуется проверка';
+        } else if (pos.status === 'НЕ НАЙДЕН' || pos.found === false) {
+            statusHtml = '<span class="badge badge-danger">❌ Не найден</span>';
+            reasonText = pos.description || 'Код отсутствует в базе данных';
+        } else {
+            statusHtml = '<span class="badge badge-success">✅ Доступен</span>';
+            reasonText = pos.description || '';
         }
         
-        const actualCoeff = pos.actualCoefficient || pos.actual_coefficient || null;
-        const expectedCoeff = pos.expectedCoefficient || pos.expected_coefficient || null;
-        let coefficientHtml = '';
-        if (!pos.isTextPosition && !pos.isText) {
-            if (actualCoeff && actualCoeff !== 1) {
-                coefficientHtml = getCoefficientStatusHtml(actualCoeff, expectedCoeff, code, positionNumber);
-            } else if (actualCoeff === 1) {
-                coefficientHtml = `<div style="margin-top: 6px; font-size: 11px; color: #10b981;"><i class="fas fa-check"></i> Коэф: 1</div>`;
-            }
-        }
-        
-        const hasDetails = pos.details && pos.details.length > 0;
         html += `
-            <tr class="position-row" data-idx="${idx}" data-position="${positionNumber}" data-code="${escapeHtml(code)}" style="cursor:pointer; border-bottom:1px solid #e2e8f0;">
-                <td style="padding:12px; vertical-align:middle; width:100px;">
-                    ${hasDetails ? `<i class="fas fa-chevron-right toggle-icon" id="toggle-icon-${idx}" style="margin-right:6px; transition:transform 0.2s;"></i>` : '<span style="display:inline-block; width:20px;"></span>'}
+            <tr class="position-row" data-idx="${idx}" style="cursor:pointer;">
+                <td style="padding:12px; vertical-align:middle;">
+                    ${pos.hasDetails ? `<i class="fas fa-chevron-right toggle-icon" id="toggle-icon-${idx}" style="margin-right:8px;"></i>` : ''}
                     <span class="position-badge">${escapeHtml(String(positionNumber))}</span>
-                 </td>
-                <td style="padding:12px; font-family:monospace; font-weight:500; vertical-align:middle; word-break:break-word;">
-                    ${escapeHtml(code)}
-                 </td>
-                <td style="padding:12px; vertical-align:middle;">
-                    <div style="font-weight:500; margin-bottom: 4px;">${escapeHtml(name)}</div>
-                    ${volumeHtml}
-                 </td>
-                <td style="padding:12px; vertical-align:middle;">
-                    <div>
-                        <span style="display:inline-flex; align-items:center; gap:6px; background:${statusBg}; color:${statusColor}; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600;">
-                            ${reason.icon} ${reason.title}
-                        </span>
-                        ${coefficientHtml}
-                    </div>
-                 </td>
-                <td style="padding:12px; vertical-align:middle; max-width:350px;">
-                    <div style="font-size:12px; color:#4b5563; line-height:1.4;">${escapeHtml(reason.message)}</div>
-                 </td>
-                <td style="padding:12px; text-align:right; font-weight:700; white-space:nowrap;">
-                    ${totalFormatted} ₽
-                 </td>
-             </tr>
+                </td>
+                <td style="padding:12px; font-family:monospace;">${escapeHtml(code)}</td>
+                <td style="padding:12px; max-width:400px;">
+                    <div style="font-weight:500;">${escapeHtml(name)}</div>
+                    ${pos.formattedVolume ? `<div style="font-size:11px; color:#059669; margin-top:4px;"><i class="fas fa-calculator"></i> ${escapeHtml(pos.formattedVolume)}</div>` : ''}
+                </td>
+                <td style="padding:12px;">${statusHtml}</td>
+                <td style="padding:12px; max-width:300px; font-size:12px; color:#4b5563;">${escapeHtml(reasonText)}</td>
+                <td style="padding:12px; text-align:right; font-weight:700;">${totalFormatted} ₽</td>
+            </tr>
         `;
-        if (hasDetails) {
+        
+        // Детали (если есть)
+        if (pos.hasDetails && pos.details && pos.details.length > 0) {
             html += renderDetailsBlock(pos.details, totalCost, idx);
         }
     }
+    
     tableBody.innerHTML = html;
+    
+    // Прикрепляем обработчики
     setTimeout(() => {
-        attachCoefficientClickHandlers();
         attachRowClickHandlers();
     }, 50);
 }
@@ -484,7 +468,203 @@ function updateFilterChipsActive() {
         if (chip.dataset.status === AppState.currentFilter) chip.classList.add('active');
     });
 }
+// public/modules/results-renderer.js
 
+/**
+ * Рендеринг таблицы КС-2
+ * @param {Array} items - Позиции КС-2
+ */
+export function renderKs2Table(items) {
+    const tableBody = document.getElementById('tableBody');
+    if (!tableBody) return;
+    
+    const safeItems = safeArray(items);
+    
+    if (safeItems.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:60px;color:#9ca3af;">📄 Нет данных КС-2</td></tr>';
+        return;
+    }
+    
+    // Обновляем заголовки таблицы для КС-2
+    const thead = document.querySelector('.data-table thead');
+    if (thead) {
+        thead.innerHTML = `
+            <tr>
+                <th style="width: 80px;">№ п/п</th>
+                <th style="width: 180px;">Шифр</th>
+                <th>Наименование работ</th>
+                <th style="width: 100px; text-align: center;">Коэф.</th>
+                <th style="width: 150px; text-align: right;">Сумма, ₽</th>
+            </tr>
+        `;
+    }
+    
+    let html = '';
+    
+    for (let idx = 0; idx < safeItems.length; idx++) {
+        const item = safeItems[idx];
+        if (!item) continue;
+        
+        const positionNumber = item.ks2_position_number || item.position || (idx + 1);
+        const code = item.code || '—';
+        const name = item.name || '—';
+        const totalAmount = item.total || 0;
+        const coefficient = item.coefficient;
+        
+        const totalFormatted = totalAmount.toLocaleString('ru-RU', { 
+            minimumFractionDigits: 2, 
+            maximumFractionDigits: 2 
+        });
+        
+        // Форматируем коэффициент
+        let coeffHtml = '—';
+        if (coefficient && coefficient !== 0 && coefficient !== 1) {
+            const coeffValue = coefficient.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+            const coeffColor = coefficient > 1 ? '#ef4444' : '#10b981';
+            coeffHtml = `<span style="color: ${coeffColor}; font-weight: 600;">${coeffValue}</span>`;
+        }
+        
+        // Объём (если есть)
+        let volumeHtml = '';
+        if (item.volume) {
+            volumeHtml = `<div style="font-size: 11px; color: #059669; margin-top: 4px;"><i class="fas fa-calculator"></i> ${escapeHtml(item.volume)}</div>`;
+        }
+        
+        const hasDetails = item.details && item.details.length > 0;
+        
+        html += `
+            <tr class="position-row" data-idx="${idx}" data-is-ks2="true" style="cursor:pointer;">
+                <td style="padding: 12px; vertical-align: middle;">
+                    ${hasDetails ? `<i class="fas fa-chevron-right toggle-icon" id="toggle-icon-ks2-${idx}" style="margin-right: 8px;"></i>` : ''}
+                    <span class="position-badge">${escapeHtml(String(positionNumber))}</span>
+                </td>
+                <td style="padding: 12px; font-family: monospace;">${escapeHtml(code)}</td>
+                <td style="padding: 12px;">
+                    <div style="font-weight: 500;">${escapeHtml(name)}</div>
+                    ${volumeHtml}
+                </td>
+                <td style="padding: 12px; text-align: center;">${coeffHtml}</td>
+                <td style="padding: 12px; text-align: right; font-weight: 700;">${totalFormatted} ₽</td>
+            </tr>
+        `;
+        
+        // Детали (ЗП, ЭМ, МР, НР, СП)
+        if (hasDetails) {
+            html += renderKs2DetailsBlock(item.details, item.total, idx);
+        }
+    }
+    
+    tableBody.innerHTML = html;
+    
+    // Прикрепляем обработчики для раскрытия деталей
+    setTimeout(() => {
+        attachKs2RowClickHandlers();
+    }, 50);
+}
+
+/**
+ * Рендеринг блока деталей для КС-2
+ */
+function renderKs2DetailsBlock(details, totalAmount, idx) {
+    if (!details || details.length === 0) return '';
+    
+    // Группируем детали по типу
+    const groups = {
+        'ЗП': { amount: 0, items: [], icon: 'fa-user-hard-hat', color: '#2563eb' },
+        'ЭМ': { amount: 0, items: [], icon: 'fa-industry', color: '#d97706' },
+        'МР': { amount: 0, items: [], icon: 'fa-cubes', color: '#059669' },
+        'НР': { amount: 0, items: [], icon: 'fa-percent', color: '#db2777' },
+        'СП': { amount: 0, items: [], icon: 'fa-chart-simple', color: '#7c3aed' },
+        'Прочие': { amount: 0, items: [], icon: 'fa-gear', color: '#6b7280' }
+    };
+    
+    for (const detail of details) {
+        const typeRaw = (detail.type || '').toUpperCase();
+        let groupKey = 'Прочие';
+        if (typeRaw === 'ЗП' || typeRaw.startsWith('ЗП ')) groupKey = 'ЗП';
+        else if (typeRaw === 'ЭМ' || typeRaw.startsWith('ЭМ ')) groupKey = 'ЭМ';
+        else if (typeRaw === 'МР' || typeRaw.startsWith('МР ')) groupKey = 'МР';
+        else if (typeRaw === 'НР' || typeRaw.startsWith('НР ')) groupKey = 'НР';
+        else if (typeRaw === 'СП' || typeRaw.startsWith('СП ')) groupKey = 'СП';
+        
+        groups[groupKey].amount += (detail.amount || 0);
+        groups[groupKey].items.push(detail);
+    }
+    
+    let groupsHtml = '';
+    for (const [groupName, groupData] of Object.entries(groups)) {
+        if (groupData.amount === 0) continue;
+        groupsHtml += `
+            <div style="background: ${groupData.color}08; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; border-left: 3px solid ${groupData.color};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-weight: 600; color: ${groupData.color};">
+                        <i class="fas ${groupData.icon}" style="margin-right: 6px;"></i>
+                        ${groupName}
+                    </span>
+                    <span style="font-weight: 700; color: ${groupData.color};">
+                        ${groupData.amount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+                    </span>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: #4b5563;">
+                    ${groupData.items.map(d => `<span>${escapeHtml(d.type)}: ${(d.amount || 0).toLocaleString('ru-RU')} ₽</span>`).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    return `
+        <tr id="details-row-ks2-${idx}" style="display: none; background: #f8fafc;">
+            <td colspan="5" style="padding: 0;">
+                <div style="margin: 8px 12px 12px 50px; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #eef2f6;">
+                    <div style="background: #f1f5f9; padding: 10px 16px; font-weight: 600; font-size: 13px; border-bottom: 1px solid #e2e8f0;">
+                        <i class="fas fa-list-ul" style="margin-right: 8px; color: #667eea;"></i> 
+                        Состав работ и затрат (ЗП, ЭМ, МР, НР, СП)
+                    </div>
+                    <div style="padding: 12px;">
+                        ${groupsHtml}
+                    </div>
+                    <div style="background: #eef2ff; padding: 8px 12px; border-top: 1px solid #e2e8f0; text-align: right;">
+                        <span style="font-weight: 600;">ВСЕГО ПОЗИЦИЯ:</span>
+                        <span style="font-weight: 700; color: #667eea; margin-left: 12px;">
+                            ${totalAmount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+                        </span>
+                    </div>
+                </div>
+            </td>
+        </tr>
+    `;
+}
+
+/**
+ * Прикрепление обработчиков для строк КС-2
+ */
+function attachKs2RowClickHandlers() {
+    const rows = document.querySelectorAll('.position-row');
+    rows.forEach(row => {
+        row.removeEventListener('click', handleKs2RowClick);
+        row.addEventListener('click', handleKs2RowClick);
+    });
+}
+
+function handleKs2RowClick(event) {
+    const row = event.currentTarget;
+    const idx = row.dataset.idx;
+    if (idx !== undefined) {
+        const detailsRow = document.getElementById(`details-row-ks2-${idx}`);
+        const icon = document.getElementById(`toggle-icon-ks2-${idx}`);
+        if (detailsRow && icon) {
+            if (detailsRow.style.display === 'none' || detailsRow.style.display === '') {
+                detailsRow.style.display = 'table-row';
+                icon.classList.remove('fa-chevron-right');
+                icon.classList.add('fa-chevron-down');
+            } else {
+                detailsRow.style.display = 'none';
+                icon.classList.remove('fa-chevron-down');
+                icon.classList.add('fa-chevron-right');
+            }
+        }
+    }
+}
 function showReasonsSummary(positions) {
     const safePositions = safeArray(positions);
     let summaryContainer = document.getElementById('reasonsSummary');

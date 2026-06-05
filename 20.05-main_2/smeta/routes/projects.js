@@ -110,13 +110,11 @@ router.get('/projects/:id', requireAuth, async (req, res) => {
  * GET /api/projects/:id/sessions
  * Получение списка сессий проекта
  */
+// routes/projects.js
+
 router.get('/projects/:id/sessions', requireAuth, async (req, res) => {
     try {
         const projectId = parseInt(req.params.id);
-        
-        if (isNaN(projectId)) {
-            return res.status(400).json({ error: 'Неверный идентификатор проекта' });
-        }
         
         const project = await logsDb.getProjectById(projectId, req.userId);
         if (!project) {
@@ -125,31 +123,26 @@ router.get('/projects/:id/sessions', requireAuth, async (req, res) => {
         
         const sessions = await logsDb.getProjectSessions(projectId);
         
-        const sessionsWithStats = sessions.map(s => ({
-            session_id: s.session_id,
-            created_at: s.created_at,
-            filename: s.filename,
-            estimate_name: s.estimate_name,
-            total_codes: s.total_codes,
-            found_codes: s.found_codes,
-            not_found_codes: s.not_found_codes,
-            coefficient_matches: s.coefficient_matches,
-            coefficient_mismatches: s.coefficient_mismatches,
-            total_amount: s.total_amount,
-            status: s.status,
-            is_revised: s.is_revised,
-            problem_count: s.problem_count,
-            warning_count: s.warning_count,
-            not_allowed_count: s.not_allowed_count
+        // ПРЕОБРАЗУЕМ СУММУ - ЗАМЕНЯЕМ ЗАПЯТУЮ НА ТОЧКУ
+        const formattedSessions = sessions.map(session => ({
+            ...session,
+            total_amount: session.total_amount !== null && session.total_amount !== undefined
+                ? parseFloat(String(session.total_amount).replace(',', '.'))
+                : null
         }));
+        
+        console.log(`✅ Найдено ${formattedSessions.length} сессий для проекта ${projectId}`);
+        if (formattedSessions.length > 0) {
+            console.log(`💰 Первая сессия: total_amount=${formattedSessions[0].total_amount}`);
+        }
         
         res.json({ 
             success: true, 
-            sessions: sessionsWithStats,
+            sessions: formattedSessions,
             current_session_id: project.current_session_id 
         });
     } catch (err) {
-        console.error('Ошибка получения сессий проекта:', err);
+        console.error('❌ Ошибка получения сессий:', err);
         res.status(500).json({ error: err.message });
     }
 });

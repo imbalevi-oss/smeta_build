@@ -1,18 +1,50 @@
 // routes/analyze.js
 // Полностью переписанные маршруты для анализа смет и КС-2
-// Использует единые парсеры parseEstimate (смета) и parseKS2 (акты)
 
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-//const { parseEstimate } = require('../../shareds/estimate-parser');
 const { parseKS2 } = require('../../shareds/ks2-parser');
 const logsDb = require('../../shareds/logs-db');
 const usersDb = require('../../shareds/users-db');
 const codesDb = require('../../shareds/codes-db');
 const { parseEstimate, extractCodeFromStrings } = require('../../shareds/estimate-parser');
 const router = express.Router();
+const iconv = require('iconv-lite');
+
+// ==================== ЕДИНАЯ ФУНКЦИЯ ДЛЯ СОХРАНЕНИЯ ОРИГИНАЛЬНЫХ ИМЁН ====================
+function saveWithOriginalName(file) {
+    let originalName = file.originalname;
+    
+    // Если есть кракозябры - пробуем декодировать
+    if (/[Ðà-ÿ]/i.test(originalName) && !/[а-яА-ЯёЁ]/.test(originalName)) {
+        try {
+            const buffer = Buffer.from(originalName, 'latin1');
+            const decoded = buffer.toString('utf8');
+            if (/[а-яА-ЯёЁ]/.test(decoded)) {
+                originalName = decoded;
+            }
+        } catch(e) {}
+    }
+    
+    // Замена опасных символов
+    originalName = originalName.replace(/[<>:"|?*\\/]/g, '_');
+    
+    const timestamp = Date.now();
+    const ext = path.extname(originalName);
+    const nameWithoutExt = path.basename(originalName, ext);
+    return `${timestamp}-${nameWithoutExt}${ext}`;
+}
+
+function getOriginalDisplayName(filename) {
+    if (!filename) return '';
+    // Убираем timestamp из имени файла для отображения
+    let name = path.basename(filename);
+    // Удаляем префикс вида 1234567890-
+    name = name.replace(/^\d+-/, '');
+    return name;
+}
 
 // ==================== МИДЛВАРЫ ====================
 function getUserId(req) {
@@ -34,7 +66,7 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
-    filename: (req, file, cb) => cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname))
+    filename: (req, file, cb) => cb(null, saveWithOriginalName(file))
 });
 
 const upload = multer({
@@ -47,70 +79,26 @@ const upload = multer({
     }
 });
 
-// ==================== КОПИЯ РАБОЧЕЙ ФУНКЦИИ ИЗ ks2-parser.js ====================
-// (чтобы быть уверенными, что извлечение кода работает одинаково)
-function extractCodeFromString(str) {
-    if (!str || typeof str !== 'string') return { code: null, comment: '' };
-    const trimmed = str.trim();
-    if (trimmed === '') return { code: null, comment: '' };
-    if (trimmed.toLowerCase().startsWith('цена поставщика')) {
-        return { code: trimmed, comment: '' };
-    }
-    const patterns = [
-        /^(\d+\.\d+-\d+-\d+-\d+\/\d+)/,
-        /^(\d+\.\d+-\d+-\d+-\d+)/,
-        /^(\d+\.\d+-\d+-\d+)/,
-        /^(\d{1,2}-\d{2}-\d{3}-\d{2}(?:\/\d+)?)/,
-        /^(\d{1,2}-\d{2}-\d{3}-\d{2})/,
-        /^(\d{1,2}\.\d{2}-\d{3}-\d{2})/,
-        /^(\d{1,2}\.\d{2}\.\d{3}\.\d{2})/,
-        /^(?:ГЭСН|ФЕР|ТЕР|СН)?\s*(\d{1,2}[.-]\d{2}[.-]\d{3}[.-]\d{2})/i,
-        /^(\d+\.\d+\.\d+\.\d+)/,
-        /^(\d+\.\d+-\d+-\d+)/,
-        /^(\d+-\d+-\d+-\d+)/,
-        /^(\d+)/
-    ];
-    for (const pattern of patterns) {
-        const match = trimmed.match(pattern);
-        if (match) {
-            let code = match[1];
-            code = code.replace(/[^0-9.\-\/]/g, '');
-            if (code && code.length > 2) {
-                const comment = trimmed.substring(match[0].length).trim();
-                return { code, comment };
-            }
-        }
-    }
-    return { code: null, comment: trimmed };
-}
-/*
-// ==================== АНАЛИЗ СМЕТЫ (НОВЫЙ ЕДИНЫЙ ПАРСЕР) ====================
-/**
- * POST /api/detailed-analyze-unified
- * Анализ сметы с проверкой кодов в БД
- * Использует parseEstimate -> сумма из колонки суммы (строка + детали)
- */
-// routes/analyze.js
-
+// ==================== АНАЛИЗ СМЕТЫ ====================
 router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
     upload.single('file')(req, res, async (err) => {
         if (err) return res.status(400).json({ error: err.message });
         if (!req.file) return res.status(400).json({ error: 'Нет файла' });
 
         const fileBuffer = fs.readFileSync(req.file.path);
-        const originalName = req.file.originalname;
+        const displayName = getOriginalDisplayName(req.file.filename);
         const projectId = req.body.projectId ? parseInt(req.body.projectId) : null;
         const isRevised = req.body.isRevised === 'true';
         const userId = req.userId;
 
         try {
             console.log(`\n${'='.repeat(80)}`);
-            console.log(`📊 АНАЛИЗ СМЕТЫ (единый парсер parseEstimate): ${originalName}`);
+            console.log(`📊 АНАЛИЗ СМЕТЫ: ${displayName}`);
             console.log(`👤 Пользователь ID: ${userId}, Проект ID: ${projectId || 'новый'}`);
             console.log(`🔄 Исправленная: ${isRevised}`);
             console.log(`${'='.repeat(80)}`);
 
-            const parseResult = parseEstimate(fileBuffer, originalName);
+            const parseResult = parseEstimate(fileBuffer, displayName);
             
             if (!parseResult.success) {
                 throw new Error(`Ошибка парсинга: ${parseResult.error}`);
@@ -137,7 +125,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 const formattedVolume = pos.formattedVolume;
                 const price = pos.price;
 
-                const { code: extractedCode } = extractCodeFromString(codeRaw);
+                const { code: extractedCode } = extractCodeFromStrings(codeRaw);
                 const isTextPosition = pos.isTextPosition || (!extractedCode && codeRaw && codeRaw.length > 0 && !/^\d/.test(codeRaw));
 
                 console.log(`\n🔍 Позиция ${positionNumber} (строка ${pos.rowNumber})`);
@@ -146,9 +134,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 console.log(`   Сумма: ${totalAmount?.toLocaleString('ru-RU') || 0} ₽`);
                 console.log(`   Коэффициент: ${actualCoefficient !== null ? actualCoefficient : '—'}`);
                 console.log(`   Объём: ${formattedVolume || 'не задан'}`);
-                console.log(`   Quantity: ${quantity}, Unit: ${unit}, Price: ${price}`);
 
-                // Текстовая позиция
                 if (isTextPosition) {
                     textCount++;
                     analyzedPositions.push({
@@ -156,6 +142,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                         code: codeRaw,
                         extractedCode: extractedCode,
                         name: name,
+                        original_name: name, 
                         status: 'Обратите внимание',
                         statusCategory: 'text',
                         matchType: 'text',
@@ -181,7 +168,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                         hasCoefficient: (actualCoefficient !== null && actualCoefficient !== 1),
                         coefficientType: 'none',
                         rowNumber: pos.rowNumber,
-                        fileName: originalName,
+                        fileName: displayName,
                         positionName: name
                     });
                     continue;
@@ -217,13 +204,12 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                         hasCoefficient: false,
                         coefficientType: 'none',
                         rowNumber: pos.rowNumber,
-                        fileName: originalName,
+                        fileName: displayName,
                         positionName: name
                     });
                     continue;
                 }
 
-                // Поиск в БД
                 const found = await codesDb.findHierarchicalMatch(extractedCode, sessionCodeCache);
                 let status = 'Доступен';
                 let description = '';
@@ -242,7 +228,6 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                     expectedCoefficient = found.coefficient_value;
                 }
 
-                // Проверка коэффициента
                 const actual = actualCoefficient !== null ? parseFloat(actualCoefficient) : null;
                 const expected = expectedCoefficient ? parseFloat(expectedCoefficient) : null;
                 const TOLERANCE = 0.01;
@@ -341,19 +326,18 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                     hasCoefficient: (actualCoefficient !== null && actualCoefficient !== 1),
                     coefficientType: 'none',
                     rowNumber: pos.rowNumber,
-                    fileName: originalName,
+                    fileName: displayName,
                     positionName: name
                 });
             }
 
-            // Сохранение сессии
             const user = await usersDb.getUserById(userId);
             const sessionId = Date.now() + '-' + Math.random().toString(36).substr(2, 8);
             
             await logsDb.createSession(sessionId, {
                 user: { fullname: user.fullname, institution: user.institution },
                 ip: req.ip,
-                filename: originalName,
+                filename: displayName,
                 estimateName: parseResult.sheetName || 'Смета',
                 isRevised,
                 totalCodes: analyzedPositions.length,
@@ -364,16 +348,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 project_id: projectId
             });
 
-            // ✅ СОХРАНЯЕМ ДЕТАЛИ КОДОВ
             console.log(`\n💾 СОХРАНЯЕМ ДЕТАЛИ КОДОВ: ${analyzedPositions.length} позиций`);
-            console.log(`🔍 Первая позиция для сохранения:`, {
-                positionNumber: analyzedPositions[0]?.positionNumber,
-                quantity: analyzedPositions[0]?.quantity,
-                unit: analyzedPositions[0]?.unit,
-                volume: analyzedPositions[0]?.volume,
-                formattedVolume: analyzedPositions[0]?.formattedVolume,
-                totalAmount: analyzedPositions[0]?.totalAmount
-            });
             
             await logsDb.addCodeDetailsBatch(sessionId, analyzedPositions);
             console.log(`✅ ДЕТАЛИ СОХРАНЕНЫ`);
@@ -419,12 +394,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
     });
 });
 
-
 // ==================== АНАЛИЗ КС-2 ====================
-/**
- * POST /api/analyze-ks2
- * Анализ файлов КС-2 (без проверки в БД, только парсинг)
- */
 router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (req, res) => {
     const ks2Files = req.files || [];
     if (!ks2Files.length) return res.status(400).json({ error: 'Не загружены файлы КС-2' });
@@ -452,33 +422,29 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
         for (let idx = 0; idx < ks2Files.length; idx++) {
             const file = ks2Files[idx];
             const filePath = file.path;
-            console.log(`\n📄 Обработка файла ${idx + 1}/${ks2Files.length}: ${file.originalname}`);
+            const displayName = getOriginalDisplayName(file.filename);
 
             try {
                 const fileBuffer = fs.readFileSync(filePath);
-                const parseResult = parseKS2(fileBuffer, file.originalname);
+                const parseResult = parseKS2(fileBuffer, displayName);
 
                 if (!parseResult.success) {
                     console.error(`   ❌ Ошибка парсинга: ${parseResult.error}`);
-                    allResults.push({ fileName: file.originalname, error: parseResult.error, success: false });
+                    allResults.push({ fileName: displayName, error: parseResult.error, success: false });
                     continue;
                 }
 
                 console.log(`   ✅ Распознано позиций: ${parseResult.totalItems}`);
                 console.log(`   💰 Сумма: ${parseResult.totalAmountFormatted} ₽`);
-                if (parseResult.detectedColumns) {
-                    console.log(`   📊 Колонки: позиция=${parseResult.detectedColumns.ks2Position}, шифр=${parseResult.detectedColumns.code}, сумма=${parseResult.detectedColumns.total}`);
-                }
 
                 const sessionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 8);
                 sessionIds.push(sessionId);
 
-                // Сохраняем сессию КС-2
                 await logsDb.createSession(sessionId, {
                     user: { fullname: user.fullname, institution: user.institution },
                     ip: req.ip,
-                    filename: file.originalname,
-                    estimateName: `КС-2: ${file.originalname}`,
+                    filename: displayName,
+                    estimateName: `КС-2: ${displayName}`,
                     isRevised: false,
                     totalCodes: parseResult.totalItems,
                     foundCodes: parseResult.totalItems,
@@ -489,14 +455,13 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
                     is_ks2: 1
                 });
 
-                // Сохраняем позиции КС-2 (здесь нужно обновить метод logsDb.saveKs2Items, чтобы он соответствовал полям таблицы)
-                const savedCount = await logsDb.saveKs2Items(sessionId, file.originalname, idx + 1, parseResult.items);
+                const savedCount = await logsDb.saveKs2Items(sessionId, displayName, idx + 1, parseResult.items);
                 totalSavedCount += savedCount;
                 totalItems += parseResult.totalItems;
                 totalAmount += parseResult.totalAmount;
 
                 allResults.push({
-                    fileName: file.originalname,
+                    fileName: displayName,
                     sessionId,
                     success: true,
                     totalItems: parseResult.totalItems,
@@ -508,8 +473,8 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
                 });
 
             } catch (err) {
-                console.error(`   ❌ Ошибка обработки файла ${file.originalname}:`, err.message);
-                allResults.push({ fileName: file.originalname, error: err.message, success: false });
+                console.error(`   ❌ Ошибка обработки файла ${displayName}:`, err.message);
+                allResults.push({ fileName: displayName, error: err.message, success: false });
             } finally {
                 try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch(e) {}
             }
@@ -545,21 +510,46 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
     }
 });
 
-// ==================== ВСПОМОГАТЕЛЬНЫЕ МАРШРУТЫ ДЛЯ КС-2 ====================
-/**
- * GET /api/ks2-sessions/:sessionId
- * Получение данных КС-2 по сессии
- */
-router.get('/ks2-sessions/:sessionId', requireAuth, async (req, res) => {
+// ==================== ПОЛУЧЕНИЕ КС-2 СЕССИИ ====================
+router.get('/ks2-sessions/:sessionId', async (req, res) => {
     try {
         const { sessionId } = req.params;
+        
+        console.log(`🔍 GET /ks2-sessions/${sessionId}`);
+        
+        if (!sessionId) {
+            return res.status(400).json({ error: 'sessionId обязателен' });
+        }
+        
         const session = await logsDb.getOne(`SELECT * FROM sessions WHERE session_id = @p0`, [sessionId]);
-        if (!session) return res.status(404).json({ error: 'Сессия не найдена' });
-
-        const user = await usersDb.findUserByUsername(session.user_name);
-        if (!user || user.id !== req.userId) return res.status(403).json({ error: 'Доступ запрещён' });
-
-        const items = await logsDb.getKs2Items(sessionId);
+        
+        if (!session) {
+            console.log(`❌ Сессия ${sessionId} не найдена`);
+            return res.status(404).json({ error: 'Сессия не найдена' });
+        }
+        
+        console.log(`✅ Сессия найдена: is_ks2=${session.is_ks2}, filename=${session.filename}`);
+        
+        let items = [];
+        try {
+            if (typeof logsDb.getKs2Items === 'function') {
+                items = await logsDb.getKs2Items(sessionId);
+                console.log(`✅ Найдено ${items.length} позиций КС-2`);
+            } else {
+                items = await logsDb.query(`
+                    SELECT * FROM ks2_items 
+                    WHERE session_id = @p0 
+                    ORDER BY position
+                `, [sessionId]);
+                console.log(`✅ Прямым запросом найдено ${items.length} позиций`);
+            }
+        } catch (itemsErr) {
+            console.error(`❌ Ошибка получения позиций:`, itemsErr.message);
+            items = [];
+        }
+        
+        const totalAmount = session.total_amount || 0;
+        
         res.json({
             success: true,
             session: {
@@ -567,24 +557,23 @@ router.get('/ks2-sessions/:sessionId', requireAuth, async (req, res) => {
                 filename: session.filename,
                 estimate_name: session.estimate_name,
                 created_at: session.created_at,
-                total_codes: session.total_codes,
-                total_amount: session.total_amount,
-                status: session.status
+                total_codes: session.total_codes || items.length,
+                total_amount: totalAmount,
+                status: session.status || 'completed',
+                is_ks2: session.is_ks2 || 1
             },
-            items,
+            items: items,
             totalItems: items.length,
-            totalAmount: session.total_amount
+            totalAmount: totalAmount
         });
+        
     } catch (error) {
-        console.error('Ошибка получения КС-2 сессии:', error);
+        console.error('❌ Ошибка получения КС-2 сессии:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
-/**
- * POST /api/export-ks2-excel
- * Экспорт результатов КС-2 в Excel
- */
+// ==================== ЭКСПОРТ КС-2 В EXCEL ====================
 router.post('/export-ks2-excel', requireAuth, async (req, res) => {
     try {
         const { items, fileName } = req.body;

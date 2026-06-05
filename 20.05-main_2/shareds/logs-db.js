@@ -172,8 +172,12 @@ try { await run(`CREATE INDEX idx_ks2_items_file ON ks2_items(file_name)`); } ca
 }
 
 // ==================== СЕССИИ ====================
+// shareds/logs-db.js
+
 async function createSession(sessionId, data) {
-    await run(`
+    console.log(`💾 createSession: ${sessionId}, is_ks2=${data.is_ks2 || 0}`);
+    
+    const result = await run(`
         INSERT INTO sessions (
             session_id, user_name, user_institution, user_ip, filename, estimate_name,
             is_revised, total_codes, found_codes, not_found_codes,
@@ -181,11 +185,11 @@ async function createSession(sessionId, data) {
             chapter_matches, relation_matches, parent_matches, sbornik_matches,
             text_lines, restoration_codes, has_coefficient_count,
             coefficient_matches, coefficient_mismatches,
-            total_amount, status, project_id
+            total_amount, status, project_id, is_ks2
         ) VALUES (
             @p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9,
             @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17,
-            @p18, @p19, @p20, @p21, @p22, @p23, @p24, @p25
+            @p18, @p19, @p20, @p21, @p22, @p23, @p24, @p25, @p26
         )
     `, [
         sessionId,
@@ -211,10 +215,12 @@ async function createSession(sessionId, data) {
         data.hasCoefficientCount || 0,
         data.coefficientMatches || 0,
         data.coefficientMismatches || 0,
-        data.totalAmount,
+        data.totalAmount || 0,
         data.status || 'completed',
-        data.project_id || null
+        data.project_id || null,
+        data.is_ks2 || 0  // ← Убедитесь, что это поле здесь
     ]);
+    
     return sessionId;
 }
 
@@ -249,6 +255,8 @@ async function updateSessionStatus(sessionId, status, totalAmount = null) {
 }
 // shareds/logs-db.js - ИСПРАВЛЕННАЯ ВЕРСИЯ
 
+// shareds/logs-db.js
+
 async function addCodeDetailsBatch(sessionId, codes) {
     console.log(`🔍 addCodeDetailsBatch: sessionId=${sessionId}, codes.length=${codes?.length}`);
     
@@ -264,36 +272,17 @@ async function addCodeDetailsBatch(sessionId, codes) {
         const c = codes[i];
         
         try {
-            // Пропускаем, если нет кода и это не текстовая позиция
-            if (!c.extractedCode && !c.isText) {
-                console.log(`⏭️ Пропуск позиции ${c.positionNumber}: нет кода`);
-                continue;
-            }
-            
-            const hasPositionNumber = c.positionNumber && c.positionNumber !== '' && c.positionNumber !== 'null';
-            const hasExtractedCode = c.extractedCode && c.extractedCode !== '' && c.extractedCode !== 'null';
-            const isMainRow = (hasPositionNumber && hasExtractedCode && !c.isText) ? 1 : 0;
-            
-            let coeffMatchValue = 0;
-            if (c.coefficientMatch === true) coeffMatchValue = 1;
-            else if (c.coefficientMatch === false) coeffMatchValue = -1;
-            
-            // Используем простой INSERT с явными параметрами
             const sql = `
                 INSERT INTO code_details (
-                    session_id, position, row_number, position_number, code, extracted_code,
-                    status, match_type, matched_level, is_restoration, is_text, has_comment,
-                    is_duplicate, duplicate_count, has_coefficient, coefficient_type,
-                    coefficient_value, expected_coefficient, coefficient_match, description,
-                    is_main_row, total_amount, quantity, unit, price,
-                    volume, formatted_volume, position_name, file_name
+                    session_id, position, row_number, position_number, 
+                    code, extracted_code, status, match_type, 
+                    is_restoration, is_text, description, total_amount,
+                    quantity, unit, price, volume, formatted_volume,
+                    created_at
                 ) VALUES (
-                    @p0, @p1, @p2, @p3, @p4, @p5,
-                    @p6, @p7, @p8, @p9, @p10, @p11,
-                    @p12, @p13, @p14, @p15,
-                    @p16, @p17, @p18, @p19,
-                    @p20, @p21, @p22, @p23, @p24,
-                    @p25, @p26, @p27, @p28
+                    @p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7,
+                    @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16,
+                    DATEADD(hour, 3, GETUTCDATE())
                 )
             `;
             
@@ -306,42 +295,32 @@ async function addCodeDetailsBatch(sessionId, codes) {
                 c.extractedCode || '',               // p5
                 c.status || '',                      // p6
                 c.matchType || 'none',               // p7
-                c.matchedLevel || 'none',            // p8
-                c.isRestoration ? 1 : 0,             // p9
-                c.isText ? 1 : 0,                   // p10
-                c.hasComment ? 1 : 0,               // p11
-                c.isDuplicate ? 1 : 0,              // p12
-                c.duplicateCount || 0,              // p13
-                c.hasCoefficient ? 1 : 0,           // p14
-                c.coefficientType || 'none',        // p15
-                c.actualCoefficient || null,        // p16
-                c.expectedCoefficient || null,      // p17
-                coeffMatchValue,                    // p18
-                c.description || null,              // p19
-                isMainRow,                          // p20
-                c.totalAmount || 0,                 // p21
-                c.quantity || 0,                    // p22
-                c.unit || '',                       // p23
-                c.price !== undefined ? c.price : null,  // p24
-                c.volume !== undefined ? c.volume : null, // p25
-                c.formattedVolume || null,          // p26
-                c.positionName || null,             // p27
-                c.fileName || null                  // p28
+                c.isRestoration ? 1 : 0,             // p8
+                c.isText ? 1 : 0,                   // p9
+                c.description || null,              // p10
+                c.totalAmount || 0,                 // p11
+                c.quantity || 0,                    // p12
+                c.unit || '',                       // p13
+                c.price || 0,                       // p14
+                c.volume || 0,                      // p15
+                c.formattedVolume || null           // p16
             ];
             
-            await run(sql, params);
-            savedCount++;
+            const result = await run(sql, params);
             
-            if (i < 5) {
-                console.log(`✅ Сохранена позиция ${c.positionNumber}: qty=${c.quantity}, vol=${c.volume}, amount=${c.totalAmount}`);
+            if (result.changes > 0) {
+                savedCount++;
+                if (savedCount <= 5) {
+                    console.log(`✅ Сохранена позиция ${c.positionNumber}: total=${c.totalAmount}`);
+                }
+            } else {
+                errorCount++;
+                console.error(`❌ Не сохранена позиция ${c.positionNumber}: no rows affected`);
             }
             
         } catch (err) {
             errorCount++;
             console.error(`❌ Ошибка сохранения позиции ${c.positionNumber}:`, err.message);
-            if (i < 3) {
-                console.error(`   Данные: quantity=${c.quantity}, volume=${c.volume}, totalAmount=${c.totalAmount}`);
-            }
         }
     }
     
@@ -512,10 +491,37 @@ async function getAllProjectsAdmin() {
     `);
 }
 
+// shareds/logs-db.js
+
 async function getProjectSessions(projectId) {
-    return await query(`
+    console.log(`🔍 getProjectSessions для projectId=${projectId}`);
+    
+    const sessions = await query(`
         SELECT 
-            s.*,
+            s.session_id,
+            s.created_at,
+            s.updated_at,
+            s.filename,
+            s.estimate_name,
+            s.total_codes,
+            s.found_codes,
+            s.not_found_codes,
+            s.total_amount,
+            s.status,
+            s.is_revised,
+            s.is_ks2,
+            s.coefficient_matches,
+            s.coefficient_mismatches,
+            s.restoration_codes,
+            s.text_lines,
+            s.exact_matches,
+            s.table_matches,
+            s.section_matches,
+            s.collection_matches,
+            s.chapter_matches,
+            s.relation_matches,
+            s.parent_matches,
+            s.has_coefficient_count,
             ISNULL(s.not_found_codes, 0) + ISNULL(s.restoration_codes, 0) + ISNULL(s.coefficient_mismatches, 0) as problem_count,
             (
                 SELECT ISNULL(SUM(CASE WHEN cd.status = N'Обратите внимание' OR cd.is_text = 1 THEN 1 ELSE 0 END), 0)
@@ -531,6 +537,38 @@ async function getProjectSessions(projectId) {
         WHERE s.project_id = @p0
         ORDER BY s.created_at DESC
     `, [projectId]);
+    
+    // ПРЕОБРАЗУЕМ СУММУ - ЗАМЕНЯЕМ ЗАПЯТУЮ НА ТОЧКУ
+    const formattedSessions = sessions.map(session => {
+        let totalAmount = session.total_amount;
+        if (totalAmount !== null && totalAmount !== undefined) {
+            // Если это строка с запятой, заменяем на точку и парсим
+            if (typeof totalAmount === 'string' && totalAmount.includes(',')) {
+                totalAmount = parseFloat(totalAmount.replace(',', '.'));
+            }
+            // Если это число, оставляем как есть
+            else if (typeof totalAmount === 'number') {
+                totalAmount = totalAmount;
+            }
+            // Если это строка без запятой, просто парсим
+            else if (typeof totalAmount === 'string') {
+                totalAmount = parseFloat(totalAmount);
+            }
+        }
+        
+        return {
+            ...session,
+            total_amount: isNaN(totalAmount) ? null : totalAmount
+        };
+    });
+    
+    console.log(`✅ getProjectSessions вернула ${formattedSessions.length} записей`);
+    
+    if (formattedSessions.length > 0) {
+        console.log(`💰 Первая сессия: total_amount=${formattedSessions[0].total_amount} (${typeof formattedSessions[0].total_amount})`);
+    }
+    
+    return formattedSessions;
 }
 
 async function adminUpdateProjectStatus(projectId, status) {
@@ -857,7 +895,26 @@ async function getFileTypeStats(startDate, endDate) {
 }
 
 async function getCodeStatusStats(startDate, endDate) {
-    const sessions = await query(`SELECT session_id FROM sessions WHERE created_at BETWEEN @p0 AND @p1`, [startDate, endDate]);
+    const sessions = await query(`SELECT 
+            session_id,
+            created_at,
+            filename,
+            estimate_name,
+            total_codes,
+            found_codes,
+            not_found_codes,
+            total_amount,
+            status,
+            is_revised,
+            is_ks2,  // ← ЭТО ПОЛЕ ДОЛЖНО БЫТЬ
+            coefficient_matches,
+            coefficient_mismatches,
+            restoration_codes,
+            text_lines
+        FROM sessions 
+        WHERE project_id = @p0 
+        ORDER BY created_at DESC
+    `, [projectId]);
     const sessionIds = sessions.map(s => s.session_id);
     if (sessionIds.length === 0) {
         return { available: 0, warning: 0, notAllowed: 0, notFound: 0 };
@@ -1359,6 +1416,7 @@ module.exports = {
     getProjectSessions,
     getOne,  // уже должно быть
     query, 
+    getKs2Items,
     adminUpdateProjectStatus,
     adminDeleteProject
 };

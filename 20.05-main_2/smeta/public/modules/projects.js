@@ -36,7 +36,33 @@ export async function loadAllProjects() {
         }
     }
 }
+// public/modules/projects.js - в самое начало, после импортов
 
+// Функция декодирования имени файла для отображения
+function decodeFilename(filename) {
+    if (!filename) return '';
+    try {
+        // Пробуем декодировать URI компоненты
+        let decoded = decodeURIComponent(filename);
+        if (decoded !== filename && /[а-яА-Я]/.test(decoded)) {
+            return decoded;
+        }
+    } catch (e) {}
+    
+    // Убираем типичные кракозябры
+    let result = filename;
+    const replacements = {
+        'Ð': 'С', 'µ': 'м', '°': ' ', 'Ñ': 'С', '': '',
+        'â': '-', 'â': '\'', 'â': '"', 'â': '"'
+    };
+    for (const [from, to] of Object.entries(replacements)) {
+        result = result.split(from).join(to);
+    }
+    
+    // Если после замен всё ещё есть кракозябры, показываем как есть
+    if (result !== filename) return result;
+    return filename;
+}
 export function applyProjectFilter() {
     if (AppState.currentProjectFilter === 'all') {
         updateState('filteredProjects', [...AppState.allProjects]);
@@ -216,32 +242,67 @@ export function showProjectWorkspace(project, session) {
     updateState('currentViewSessionId', null);
 }
 
+// public/modules/projects.js
+
 export async function loadProjectHistory() {
-    if (!AppState.currentProjectId) return;
+    if (!AppState.currentProjectId) {
+        console.warn('⚠️ loadProjectHistory: нет выбранного проекта');
+        return;
+    }
     
     const historyList = document.getElementById('historyList');
     if (historyList) {
-        historyList.innerHTML = `<div style="padding:20px;text-align:center;color:#9ca3af;"><i class="fas fa-spinner fa-spin"></i> Загрузка истории...</div>`;
+        historyList.innerHTML = `<div style="padding:20px;text-align:center;color:#9ca3af;">
+            <i class="fas fa-spinner fa-spin"></i> Загрузка истории...
+        </div>`;
     }
     
     try {
+        console.log(`📡 Загрузка истории для проекта ${AppState.currentProjectId}`);
+        
         const response = await fetch(`/api/projects/${AppState.currentProjectId}/sessions`, {
             headers: { 'X-User-Id': AppState.currentUser?.id || '' }
         });
         
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
+        console.log('📊 Получены данные истории:', data);
         
         if (data.success) {
             updateState('projectSessions', safeArray(data.sessions));
+            // ВАЖНО: передаём data.sessions напрямую
             renderHistoryList(data.sessions, data.current_session_id);
+        } else {
+            throw new Error(data.error || 'Ошибка загрузки истории');
         }
+        
     } catch (error) {
-        console.error('Ошибка загрузки истории:', error);
+        console.error('❌ Ошибка загрузки истории:', error);
         if (historyList) {
-            historyList.innerHTML = `<div style="padding:20px;text-align:center;color:#ef4444;"><i class="fas fa-exclamation-circle"></i> Ошибка загрузки истории</div>`;
+            historyList.innerHTML = `
+                <div style="padding:40px;text-align:center;">
+                    <i class="fas fa-exclamation-circle" style="font-size:32px;color:#ef4444;margin-bottom:12px;"></i>
+                    <p style="color:#6b7280;">Ошибка загрузки истории</p>
+                    <p style="color:#9ca3af;font-size:13px;margin-top:4px;">${error.message}</p>
+                    <button onclick="window.loadProjectHistory()" class="btn-sm btn-primary" style="margin-top:16px;">
+                        <i class="fas fa-sync-alt"></i> Повторить
+                    </button>
+                </div>
+            `;
         }
     }
 }
+
+// modules/projects.js
+
+// public/modules/projects.js
+
+// public/modules/projects.js
+
+// public/modules/projects.js - функция renderHistoryList
 
 function renderHistoryList(sessions, currentSessionId) {
     const historyList = document.getElementById('historyList');
@@ -250,7 +311,7 @@ function renderHistoryList(sessions, currentSessionId) {
     const safeSessions = safeArray(sessions);
     
     if (!safeSessions.length) {
-        historyList.innerHTML = `<div style="padding:40px;text-align:center;"><i class="fas fa-folder-open" style="font-size:32px;color:#cbd5e1;margin-bottom:12px;"></i><p style="color:#6b7280;">История анализов пуста</p><p style="color:#9ca3af;font-size:13px;margin-top:4px;">Загрузите файл для анализа</p></div>`;
+        historyList.innerHTML = `<div style="padding:40px;text-align:center;color:#6b7280;">История анализов пуста</div>`;
         return;
     }
     
@@ -261,29 +322,60 @@ function renderHistoryList(sessions, currentSessionId) {
         const date = formatMoscowDate(session.created_at);
         const isCurrent = session.session_id === currentSessionId;
         const isActive = session.session_id === AppState.currentViewSessionId;
-        const statusIcon = session.status === 'completed' ? '✅' : (session.status === 'error' ? '❌' : '⏳');
-        const amountFormatted = session.total_amount ? Number(session.total_amount).toLocaleString('ru-RU') + ' ₽' : '—';
+        
+        // ОПРЕДЕЛЯЕМ ТИП СЕССИИ
+        const isKs2 = session.is_ks2 === 1;
+        const sessionType = isKs2 ? '📄 КС-2' : '📊 Смета';
+        const sessionTypeBg = isKs2 ? '#fef3c7' : '#e0e7ff';
+        const sessionTypeColor = isKs2 ? '#d97706' : '#4f46e5';
+        
+        // Иконка статуса
+        let statusIcon = '✅';
+        if (session.status === 'error') statusIcon = '❌';
+        else if (session.status === 'started') statusIcon = '⏳';
+        
+        // Форматируем сумму
+        let amountFormatted = '—';
+        if (session.total_amount && session.total_amount > 0) {
+            amountFormatted = session.total_amount.toLocaleString('ru-RU', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }) + ' ₽';
+        }
+        
+        // Сокращаем имя файла
+        let filename = session.filename || 'Без имени';
+        if (filename.length > 50) filename = filename.substring(0, 47) + '...';
         
         html += `
-            <div class="history-item ${isActive ? 'active' : ''}" onclick="window.viewSessionFromHistory('${session.session_id}')">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;">
-                    <div>
-                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                            <span style="font-size:20px;">${statusIcon}</span>
-                            <div>
-                                <div style="font-weight:600;color:#1f2937;">Анализ от ${date}</div>
-                                <div style="font-size:12px;color:#6b7280;">${escapeHtml(session.filename || 'Без имени')}</div>
+            <div class="history-item ${isActive ? 'active' : ''}" 
+                 data-session-id="${session.session_id}"
+                 data-is-ks2="${isKs2}"
+                 onclick="window.viewSessionFromHistory('${session.session_id}')"
+                 style="cursor:pointer; border-bottom:1px solid #e5e7eb; transition:all 0.2s; background: ${isActive ? '#eef2ff' : 'white'};">
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 16px;">
+                    <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:0;">
+                        <span style="font-size:20px;">${statusIcon}</span>
+                        <div style="min-width:0; flex:1;">
+                            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
+                                <span style="background:${sessionTypeBg}; color:${sessionTypeColor}; padding:2px 10px; border-radius:20px; font-size:11px; font-weight:600;">
+                                    ${sessionType}
+                                </span>
+                                <span style="font-weight:500; color:#1f2937; font-size:13px; word-break:break-word;">
+                                    ${escapeHtml(filename)}
+                                </span>
                             </div>
-                        </div>
-                        <div style="display:flex;gap:16px;font-size:12px;">
-                            <span>📊 ${session.total_codes || 0} позиций</span>
-                            <span>🎯 ${session.found_codes || 0}/${session.total_codes || 0}</span>
+                            <div style="display:flex; gap:12px; font-size:11px; color:#6b7280;">
+                                <span>📅 ${date}</span>
+                                <span>📊 ${session.total_codes || 0} позиций</span>
+                            </div>
                         </div>
                     </div>
                     <div style="text-align:right;">
-                        <div style="font-weight:700;color:#1f2937;">${amountFormatted}</div>
-                        ${isCurrent ? '<div class="position-badge" style="background:#10b981;color:white;font-size:10px;margin-top:4px;">Текущий</div>' : ''}
-                        ${session.is_revised ? '<div class="position-badge" style="background:#f59e0b;color:white;font-size:10px;margin-top:4px;">Исправленный</div>' : ''}
+                        <div style="font-weight:700; font-size:15px; color:#059669; white-space:nowrap;">
+                            ${amountFormatted}
+                        </div>
+                        ${isCurrent ? '<div style="background:#10b981; color:white; padding:2px 8px; border-radius:12px; font-size:9px; margin-top:4px;">Текущий</div>' : ''}
                     </div>
                 </div>
             </div>
@@ -293,30 +385,254 @@ function renderHistoryList(sessions, currentSessionId) {
     historyList.innerHTML = html;
 }
 
+// public/modules/projects.js
+
+// public/modules/projects.js
+
+// public/modules/projects.js
+
+// public/modules/projects.js
+
+// public/modules/projects.js
+
 export async function viewSessionFromHistory(sessionId) {
+    if (!sessionId) {
+        showError('ID сессии не указан');
+        return;
+    }
+    
+    console.log(`🔍 Просмотр сессии из истории: ${sessionId}`);
+    
     try {
         showLoading();
         updateState('currentViewSessionId', sessionId);
         
-        const response = await fetch(`/api/projects/${AppState.currentProjectId}/sessions/${sessionId}`, {
-            headers: { 'X-User-Id': AppState.currentUser?.id || '' }
+        const projectId = AppState.currentProjectId;
+        if (!projectId) throw new Error('ID проекта не найден');
+        
+        // Получаем информацию о сессии
+        const sessionInfoResponse = await fetch(`/api/projects/${projectId}/sessions/${sessionId}`, {
+            headers: { 'X-User-Id': AppState.currentUser?.id.toString() || '' }
         });
         
-        const data = await response.json();
+        const sessionInfo = await sessionInfoResponse.json();
         
-        if (data.success && data.session) {
-            displayResultsFromSession(data.session);
-            await loadProjectHistory();
-            showSuccess('Загружен результат анализа');
-        } else {
-            throw new Error(data.error || 'Ошибка загрузки сессии');
+        if (!sessionInfo.success || !sessionInfo.session) {
+            throw new Error('Сессия не найдена');
         }
+        
+        const isKs2 = sessionInfo.session.is_ks2 === 1;
+        console.log(`📋 Тип сессии: ${isKs2 ? 'КС-2' : 'Смета'}`);
+        
+        if (isKs2) {
+            // Загружаем КС-2 сессию
+            console.log(`📡 Загрузка КС-2 сессии: /api/ks2-sessions/${sessionId}`);
+            
+            const response = await fetch(`/api/ks2-sessions/${sessionId}`, {
+                headers: { 
+                    'X-User-Id': AppState.currentUser?.id.toString() || ''
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            console.log('📊 Данные КС-2:', data);
+            
+            if (data.success) {
+                // Отображаем КС-2 результаты
+                if (window.displayKs2Session) {
+                    window.displayKs2Session(data);
+                } else {
+                    // Fallback отображение
+                    displayKs2SessionFallback(data);
+                }
+                showSuccess(`Загружен КС-2: ${data.session?.filename || 'Без имени'}`);
+            } else {
+                throw new Error(data.error || 'Ошибка загрузки КС-2 сессии');
+            }
+        } else {
+            // Загружаем сметную сессию
+            const response = await fetch(`/api/projects/${projectId}/sessions/${sessionId}`, {
+                headers: { 'X-User-Id': AppState.currentUser?.id.toString() || '' }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success && data.session) {
+                if (window.displayResultsFromSession) {
+                    window.displayResultsFromSession(data.session);
+                }
+                showSuccess(`Загружена смета: ${data.session.filename || 'Без имени'}`);
+            } else {
+                throw new Error(data.error || 'Ошибка загрузки сессии');
+            }
+        }
+        
+        updateHistoryActiveState(sessionId);
+        
     } catch (error) {
-        console.error('Ошибка загрузки сессии:', error);
-        showError('Ошибка загрузки результата анализа');
+        console.error('❌ Ошибка загрузки сессии:', error);
+        showError(`Ошибка загрузки: ${error.message}`);
     } finally {
         hideLoading();
     }
+}
+
+// projects.js - в функции displayKs2SessionFallback
+
+function displayKs2SessionFallback(data) {
+    console.log('🔄 Используем fallback для отображения КС-2');
+    
+    const statsEl = document.getElementById('stats');
+    const resultsEl = document.getElementById('results');
+    const emptyStateEl = document.getElementById('emptyState');
+    
+    if (statsEl) {
+        statsEl.innerHTML = `
+            <div style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);border-radius:20px;padding:24px;margin-bottom:24px;">
+                <div style="color:rgba(255,255,255,0.8);font-size:13px;">📊 ИТОГОВАЯ СУММА ПО КС-2</div>
+                <div style="color:white;font-size:36px;font-weight:800;">${(data.totalAmount || 0).toLocaleString('ru-RU')} ₽</div>
+                <div style="color:rgba(255,255,255,0.6);font-size:12px;">📋 Позиций: ${data.items?.length || 0}</div>
+            </div>
+        `;
+        statsEl.classList.remove('hidden');
+    }
+    
+    if (resultsEl) {
+        resultsEl.classList.remove('hidden');
+        resultsEl.style.display = 'block';
+    }
+    if (emptyStateEl) {
+        emptyStateEl.classList.add('hidden');
+        emptyStateEl.style.display = 'none';
+    }
+    
+    // Отображаем таблицу КС-2
+    if (typeof window.renderKs2Table === 'function') {
+        window.renderKs2Table(data.items);
+        console.log('✅ Таблица КС-2 отображена');
+    } else {
+        console.error('❌ renderKs2Table не определена');
+        // Показываем простую таблицу как fallback
+        displaySimpleKs2Table(data.items);
+    }
+}
+
+function displaySimpleKs2Table(items) {
+    const tableBody = document.getElementById('tableBody');
+    if (!tableBody) return;
+    
+    let html = '';
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        html += `
+            <tr>
+                <td>${item.ks2_position_number || i+1}</td>
+                <td>${escapeHtml(item.code || '—')}</td>
+                <td>${escapeHtml(item.name || '—')}</td>
+                <td>—</td>
+                <td style="text-align:right">${(item.total || 0).toLocaleString('ru-RU')} ₽</td>
+            </tr>
+        `;
+    }
+    tableBody.innerHTML = html;
+}
+// Вспомогательная функция для получения проблемных позиций
+function getProblemPositions(codes) {
+    if (!codes || !codes.length) return [];
+    
+    return codes.filter(code => {
+        if (!code) return false;
+        // Текстовая позиция
+        if (code.isText === true || code.is_text === 1 || code.matchType === 'text') return true;
+        // Запрещённая
+        if (code.status === 'Нельзя применять' || code.isRestoration === true || code.is_restoration === 1) return true;
+        // Требует внимания
+        if (code.status === 'Обратите внимание') return true;
+        // Коэффициент не совпадает
+        if (code.coefficientMatch === false) return true;
+        // Не найден
+        if (code.found === false && code.status !== 'Доступен') return true;
+        return false;
+    });
+}
+
+// Вспомогательная функция для отображения статистики сессии
+function displaySessionStats(session) {
+    const statsEl = document.getElementById('stats');
+    if (!statsEl) return;
+    
+    const codes = session.codes || [];
+    const warningCount = codes.filter(c => c.status === 'Обратите внимание' || c.coefficientMatch === false).length;
+    const notAllowedCount = codes.filter(c => c.status === 'Нельзя применять' || c.isRestoration).length;
+    const textCount = codes.filter(c => c.isText || c.matchType === 'text').length;
+    const foundCount = codes.filter(c => c.found !== false && c.status !== 'Нельзя применять' && !c.isText).length;
+    
+    statsEl.innerHTML = `
+        <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:20px;padding:24px;margin-bottom:24px;">
+            <div style="color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:1px;">📊 ИТОГОВАЯ СУММА</div>
+            <div style="color:white;font-size:36px;font-weight:800;">${(session.total_amount || 0).toLocaleString('ru-RU')} ₽</div>
+            <div style="color:rgba(255,255,255,0.6);font-size:12px;margin-top:8px;">📋 Всего позиций: ${codes.length}</div>
+        </div>
+        <div class="stats-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;">
+            <div class="stat-item"><div class="stat-value" style="color:#10b981;">${foundCount}</div><div class="stat-label">✅ Найдено</div></div>
+            <div class="stat-item"><div class="stat-value" style="color:#f59e0b;">${warningCount}</div><div class="stat-label">⚠️ Внимание</div></div>
+            <div class="stat-item"><div class="stat-value" style="color:#ef4444;">${notAllowedCount}</div><div class="stat-label">❌ Запрещены</div></div>
+            <div class="stat-item"><div class="stat-value" style="color:#8b5cf6;">${textCount}</div><div class="stat-label">📝 Цена поставщика</div></div>
+        </div>
+    `;
+    statsEl.classList.remove('hidden');
+    statsEl.style.display = 'block';
+}
+
+// Вспомогательная функция для показа таблицы результатов
+function showResultsTable() {
+    const resultsEl = document.getElementById('results');
+    const emptyStateEl = document.getElementById('emptyState');
+    
+    if (resultsEl) {
+        resultsEl.classList.remove('hidden');
+        resultsEl.style.display = 'block';
+    }
+    if (emptyStateEl) {
+        emptyStateEl.classList.add('hidden');
+        emptyStateEl.style.display = 'none';
+    }
+}
+
+// Вспомогательная функция для показа пустого состояния
+function showEmptyStateMessage(message) {
+    const resultsEl = document.getElementById('results');
+    const emptyStateEl = document.getElementById('emptyState');
+    
+    if (resultsEl) {
+        resultsEl.classList.add('hidden');
+        resultsEl.style.display = 'none';
+    }
+    if (emptyStateEl) {
+        emptyStateEl.classList.remove('hidden');
+        emptyStateEl.style.display = 'block';
+        emptyStateEl.innerHTML = `
+            <div class="empty-icon"><i class="fas fa-check-circle" style="color:#10b981;font-size:48px;"></i></div>
+            <h3 style="font-size:18px;font-weight:600;color:#059669;margin-bottom:8px;">${message}</h3>
+        `;
+    }
+}
+
+// Обновление активного состояния в списке истории
+function updateHistoryActiveState(sessionId) {
+    const historyItems = document.querySelectorAll('.history-item');
+    historyItems.forEach(item => {
+        const itemSessionId = item.dataset.sessionId;
+        if (itemSessionId === sessionId) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
 }
 
 export async function archiveProject(projectId) {

@@ -2236,3 +2236,19 @@ body {
     justify-content: center;
     margin-top: 16px;
 }
+/* style.css */
+
+.history-item .session-type-estimate {
+    background: #e0e7ff;
+    color: #4f46e5;
+}
+
+.history-item .session-type-ks2 {
+    background: #fef3c7;
+    color: #d97706;
+}
+
+.history-item.active {
+    background: #eef2ff;
+    border-left: 3px solid #667eea;
+}
