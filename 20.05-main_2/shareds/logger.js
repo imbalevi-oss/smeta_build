@@ -88,7 +88,7 @@ class Logger {
 
     async logApiRequest(method, endpoint, statusCode, durationMs, ip, userAgent) {
         const moscowTime = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
-        console.log(`[${moscowTime}] ${method} ${endpoint} - ${statusCode} (${durationMs}ms)`);
+    
         await logsDb.logApiRequest(method, endpoint, statusCode, durationMs, ip, userAgent);
     }
 }

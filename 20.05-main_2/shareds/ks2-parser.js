@@ -9,16 +9,36 @@ const iconv = require('iconv-lite');
  */
 function parseNumber(value) {
     if (value === null || value === undefined || value === '') return 0;
-    if (typeof value === 'number') return value;
+    if (typeof value === 'number') {
+        // ИСПРАВЛЕНИЕ: для чисел округляем до 2 знаков
+        if (value > 0.01 && value < 100 && value !== Math.floor(value)) {
+            return Math.round(value * 100) / 100;
+        }
+        return value;
+    }
     let str = String(value).trim();
     if (str === '') return 0;
     str = str.replace(/\s/g, '').replace(',', '.');
     const match = str.match(/-?\d+(?:\.\d+)?/);
     if (match) {
-        const num = parseFloat(match[0]);
-        return isNaN(num) ? 0 : num;
+        let num = parseFloat(match[0]);
+        if (isNaN(num)) return 0;
+        // ИСПРАВЛЕНИЕ: округляем до 2 знаков
+        if (num > 0.01 && num < 100 && num !== Math.floor(num)) {
+            num = Math.round(num * 100) / 100;
+        }
+        return num;
     }
     return 0;
+}
+
+// ИСПРАВЛЕНИЕ: parseCoefficient использует parseNumber
+function parseCoefficient(value) {
+    const num = parseNumber(value);
+    if (num !== 0 && num !== 1) {
+        return num;
+    }
+    return null;
 }
 
 /**
@@ -104,9 +124,7 @@ function fixFilename(filename) {
 function parseKS2(fileBuffer, fileName = '') {
     fileName = fixFilename(fileName);
     
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`📊 ПАРСИНГ КС-2: ${fileName}`);
-    console.log(`${'='.repeat(80)}`);
+ 
     
     try {
         const workbook = XLSX.read(fileBuffer, { type: 'buffer', cellDates: true });
@@ -114,15 +132,10 @@ function parseKS2(fileBuffer, fileName = '') {
         const sheet = workbook.Sheets[sheetName];
         const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
         
-        console.log(`   📄 Лист: ${sheetName}`);
-        console.log(`   📊 Всего строк: ${data.length}`);
+       
         
         // ==================== ВЫВОД СТРУКТУРЫ ФАЙЛА ====================
-        console.log(`\n${'─'.repeat(80)}`);
-        console.log(`📋 СТРУКТУРА ФАЙЛА (первые 30 строк):`);
-        console.log(`${'─'.repeat(80)}`);
-        console.log(`   Row | A(№)     | B(поз)   | C(шифр)                    | I(коэф) | K(сумма)   |`);
-        console.log(`${'─'.repeat(80)}`);
+    
         
         for (let i = 0; i < Math.min(30, data.length); i++) {
             const row = data[i];
@@ -132,10 +145,10 @@ function parseKS2(fileBuffer, fileName = '') {
                 const c = row[2] ? String(row[2]).substring(0, 35) : '';
                 const i_coeff = row[8] ? String(row[8]).substring(0, 10) : '';
                 const k_total = row[10] ? String(row[10]).substring(0, 12) : '';
-                console.log(`   ${String(i + 1).padStart(3)} | ${a.padEnd(10)} | ${b.padEnd(10)} | ${c.padEnd(35)} | ${i_coeff.padEnd(8)} | ${k_total.padEnd(10)} |`);
+               
             }
         }
-        console.log(`${'─'.repeat(80)}`);
+
         
         // Определяем колонки
         const codeCol = 2;           // C - шифр
@@ -144,18 +157,10 @@ function parseKS2(fileBuffer, fileName = '') {
         const nameCol = 3;           // D - наименование
         const unitCol = 4;           // E - ед.изм.
         const quantityCol = 5;       // F - количество
-        const coeffCol = 7;          // I - коэффициент
+        const coeffCol = 8;          // I - коэффициент (колонка 9 в Excel)
         const totalCol = 10;         // K - сумма
         
-        console.log(`\n📌 ИСПОЛЬЗУЕМЫЕ КОЛОНКИ:`);
-        console.log(`   A (1): № п/п`);
-        console.log(`   B (2): поз. по смете`);
-        console.log(`   C (3): Шифр`);
-        console.log(`   D (4): Наименование`);
-        console.log(`   E (5): Ед.изм.`);
-        console.log(`   F (6): Количество`);
-        console.log(`   I (9): Коэффициент`);
-        console.log(`   K (11): Сумма (ОСНОВНОЙ ИСТОЧНИК СУММЫ ПОЗИЦИИ)`);
+
         
         // ==================== СБОР ПОЗИЦИЙ ====================
         const positions = [];
@@ -164,9 +169,7 @@ function parseKS2(fileBuffer, fileName = '') {
         let totalAmount = 0;
         let skippedCount = 0;
         
-        console.log(`\n${'─'.repeat(80)}`);
-        console.log(`🔍 НАЧАЛО СБОРА ПОЗИЦИЙ (суммируем K по строке шифра + всем деталям)`);
-        console.log(`${'─'.repeat(80)}`);
+    
         
         while (i < data.length) {
             const row = data[i];
@@ -184,7 +187,7 @@ function parseKS2(fileBuffer, fileName = '') {
             if (codeLower.includes('шифр') || codeLower.includes('расценки') || 
                 codeLower.includes('итого') || codeLower.includes('раздел') ||
                 codeLower.includes('подраздел')) {
-                console.log(`   ⏭️ Пропуск заголовка: строка ${i + 1} - "${codeCell.substring(0, 40)}"`);
+               
                 i++;
                 continue;
             }
@@ -193,7 +196,7 @@ function parseKS2(fileBuffer, fileName = '') {
             const firstCell = String(row[0] || '').toLowerCase();
             if (firstCell.includes('составил') || firstCell.includes('проверил') ||
                 firstCell.includes('начальник') || firstCell.includes('главный инженер')) {
-                console.log(`   🏁 Конец документа на строке ${i + 1}`);
+              
                 break;
             }
             
@@ -209,17 +212,7 @@ function parseKS2(fileBuffer, fileName = '') {
             let positionTotal = parseNumber(row[totalCol]); // сумма в строке шифра (колонка K)
             
             // ===== ЛОГИРОВАНИЕ СУММЫ ИЗ КОЛОНКИ K =====
-            console.log(`\n${'─'.repeat(80)}`);
-            console.log(`📍 ПОЗИЦИЯ ${positionCounter}:`);
-            console.log(`   Строка: ${i + 1}`);
-            console.log(`   № п/п: ${ks2Position}`);
-            console.log(`   поз. по смете: ${estimatePosition || '—'}`);
-            console.log(`   Шифр: ${code}`);
-            console.log(`   Наименование: ${name.substring(0, 80)}${name.length > 80 ? '…' : ''}`);
-            console.log(`   Ед.изм.: ${unit || '—'}`);
-            console.log(`   Количество: ${quantity}`);
-            console.log(`   Коэффициент (колонка I): ${coefficient || '—'}`);
-            console.log(`   🔍 СУММА В СТРОКЕ ШИФРА (колонка K): исходное значение = "${row[totalCol]}", после parseNumber = ${positionTotal}`);
+
             
             // ==================== СБОР ДЕТАЛЕЙ ====================
             let details = [];
@@ -237,7 +230,7 @@ function parseKS2(fileBuffer, fileName = '') {
                 const nextCode = extractCodeFromString(nextCodeCell);
                 
                 if (nextCode && nextCode !== code) {
-                    console.log(`   🔚 Конец деталей на строке ${j+1} (начало новой позиции: ${nextCode})`);
+                 
                     break;
                 }
                 
@@ -251,7 +244,7 @@ function parseKS2(fileBuffer, fileName = '') {
                     // Сумма детали ТОЛЬКО из колонки K (не используем количество)
                     let detailTotal = parseNumber(nextRow[totalCol]);
                     
-                    console.log(`      🔎 ДЕТАЛЬ ${detailCount}: тип="${detailName}", сырое значение totalCol="${nextRow[totalCol]}", parseNumber = ${detailTotal}`);
+                    
                     
                     detailsTotal += detailTotal;
                     detailSumLog.push(`${detailName}=${detailTotal}`);
@@ -264,23 +257,22 @@ function parseKS2(fileBuffer, fileName = '') {
                         rowNumber: j + 1
                     });
                     
-                    console.log(`      📄 Деталь ${detailCount}: "${detailName}" | Сумма из K: ${detailTotal.toLocaleString('ru-RU')} ₽ | Строка: ${j + 1}`);
+                   
                 }
                 
                 j++;
             }
             
-            console.log(`   📊 СУММА ДЕТАЛЕЙ (detailsTotal) = ${detailsTotal}`);
+            
             if (detailSumLog.length) {
-                console.log(`      Расклад по деталям: ${detailSumLog.join(', ')}`);
+             
             }
             
             // ИТОГОВАЯ СУММА ПОЗИЦИИ = сумма из строки шифра + суммы из всех деталей
             let total = positionTotal + detailsTotal;
-            console.log(`   💰 ИТОГОВАЯ СУММА ПОЗИЦИИ (K строки шифра + K деталей): ${positionTotal} + ${detailsTotal} = ${total} ₽`);
-            
+           
             if (positionTotal === 0 && detailsTotal === 0) {
-                console.log(`   ⚠️ Сумма = 0 ₽ (нет значений в колонке K ни в строке шифра, ни в деталях)`);
+                
             }
             
             // Вычисляем объём (для информации)
@@ -293,19 +285,19 @@ function parseKS2(fileBuffer, fileName = '') {
                         const vol = quantity * unitValue;
                         const unitName = unit.replace(/\d+(?:[.,]\d+)?\s*/, '');
                         volume = `${vol.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} ${unitName}`;
-                        console.log(`   📏 Объём (кол-во × ед.изм.): ${quantity} × ${unit} = ${volume}`);
+                       
                     } else {
                         volume = `${quantity.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} ${unit}`;
-                        console.log(`   📏 Объём: ${volume}`);
+                       
                     }
                 } else {
                     volume = `${quantity.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} ${unit}`;
-                    console.log(`   📏 Объём: ${volume}`);
+                    
                 }
             }
             
             totalAmount += total;
-            console.log(`   💰 НАКОПЛЕННАЯ ОБЩАЯ СУММА (totalAmount) после позиции ${positionCounter}: ${totalAmount}`);
+           
             
             positions.push({
                 position: positionCounter++,
@@ -327,35 +319,23 @@ function parseKS2(fileBuffer, fileName = '') {
         }
         
         // ==================== ИТОГИ ====================
-        console.log(`\n${'='.repeat(80)}`);
-        console.log(`📊 ИТОГИ ПАРСИНГА КС-2:`);
-        console.log(`${'='.repeat(80)}`);
-        console.log(`   ✅ Всего позиций: ${positions.length}`);
-        console.log(`   💰 Общая сумма: ${totalAmount.toLocaleString('ru-RU')} ₽`);
+
         const sumOfTotals = positions.reduce((sum, p) => sum + p.total, 0);
-        console.log(`   🔢 Контроль: totalAmount (${totalAmount}) = сумма totals всех позиций (${positions.map(p => p.total).join(' + ')} = ${sumOfTotals}) — ${totalAmount === sumOfTotals ? '✅ совпадает' : '❌ РАСХОЖДЕНИЕ!'}`);
-        console.log(`   📊 С коэффициентом: ${positions.filter(p => p.coefficient).length}`);
-        console.log(`   📦 С детализацией: ${positions.filter(p => p.details.length > 0).length}`);
-        console.log(`   ⏭️ Пропущено строк: ${skippedCount}`);
-        console.log(`${'='.repeat(80)}\n`);
+   
         
         // Детальный вывод по каждой позиции
         if (positions.length > 0) {
-            console.log(`📋 ДЕТАЛЬНЫЙ СПИСОК ПОЗИЦИЙ:`);
-            console.log(`${'='.repeat(80)}`);
+
             for (const pos of positions) {
-                console.log(`\n   ${pos.position}. ${pos.ks2_position_number} | ${pos.code}`);
-                console.log(`      Наименование: ${pos.name.substring(0, 70)}`);
-                console.log(`      Коэффициент: ${pos.coefficient || '—'}`);
-                console.log(`      Сумма (K строки шифра + K деталей): ${pos.total.toLocaleString('ru-RU')} ₽`);
+              
                 if (pos.details.length > 0) {
-                    console.log(`      Детали (${pos.details.length}):`);
+                    
                     for (const d of pos.details) {
-                        console.log(`         - ${d.type}: ${d.amount.toLocaleString('ru-RU')} ₽`);
+                        
                     }
                 }
             }
-            console.log(`${'='.repeat(80)}\n`);
+           
         }
         
         return {
@@ -379,8 +359,7 @@ function parseKS2(fileBuffer, fileName = '') {
         };
         
     } catch (error) {
-        console.error(`❌ Ошибка парсинга КС-2:`, error);
-        console.error(`   Stack:`, error.stack);
+      
         return {
             success: false,
             error: error.message,

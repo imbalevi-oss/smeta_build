@@ -11,15 +11,17 @@ import {
     showNewProjectModal, closeNewProjectModal, createNewProject, loadProjectHistory
 } from './modules/projects.js';
 import { updateFileDisplay, resetFile, resetWorkspace, updateKs2Display, resetKs2 } from './modules/file-handler.js';
-import { uploadNewVersionToProject, displayResultsFromSession, displayUnifiedResults, showEmptyState } from './modules/analysis.js';
-import { filterAndDisplayResults, renderUnifiedTable } from './modules/results-renderer.js';
+import { uploadNewVersionToProject, displayResultsFromSession, showEmptyState } from './modules/analysis.js';
+import { filterAndDisplayResults, renderUnifiedTable, showEstimateResultsView, showKs2ResultsView } from './modules/results-renderer.js';
 import { generateFullReport, downloadExcelReport } from './modules/reports.js';
 import { 
     switchToProjectsTab, switchToWorkspaceTab, backToProjects, 
     initFilters, switchCheckMode, initEventListeners 
 } from './components/navigation.js';
-import { analyzeKs2, exportKs2ToExcel } from './modules/analysis-ks2.js';
+import { analyzeKs2, exportKs2ToExcel, displayKs2Session } from './modules/analysis-ks2.js';
+import { renderKs2Table } from './modules/results-renderer.js';
 import { compareEstimateWithKs2, exportComparisonToExcel } from './modules/comparison.js';
+import { copyFilteredCodes } from './modules/reports.js';
 
 
 // Глобальные функции
@@ -33,6 +35,7 @@ window.deleteProject = deleteProject;
 window.showNewProjectModal = showNewProjectModal;
 window.closeNewProjectModal = closeNewProjectModal;
 window.createNewProject = createNewProject;
+window.copyFilteredCodes = copyFilteredCodes;
 window.backToProjects = backToProjects;
 window.filterProjectsByStatus = filterProjectsByStatus;
 window.loadAllProjects = loadAllProjects;
@@ -56,6 +59,10 @@ window.resetKs2 = resetKs2;
 window.displayResultsFromSession = displayResultsFromSession;
 window.showEmptyState = showEmptyState;
 window.renderUnifiedTable = renderUnifiedTable;
+window.displayKs2Session = displayKs2Session;
+window.renderKs2Table = renderKs2Table;
+window.showEstimateResultsView = showEstimateResultsView;
+window.showKs2ResultsView = showKs2ResultsView;
 
 
 // Функция для раскрытия деталей
@@ -78,7 +85,7 @@ window.togglePositionDetails = function(idx) {
 
 // Инициализация
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 Приложение загружено');
+   
     checkAuth();
     initFilters();
     initEventListeners();

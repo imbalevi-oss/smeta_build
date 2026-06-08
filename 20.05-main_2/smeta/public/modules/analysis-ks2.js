@@ -5,6 +5,7 @@ import { AppState, updateState } from './state.js';
 import { showLoading, hideLoading, showError, showSuccess } from './ui-notifications.js';
 import { resetKs2 } from './file-handler.js';
 import { escapeHtml } from '../utils/helpers.js';
+import { renderKs2Table } from './results-renderer.js';
 
 /**
  * Анализ загруженных файлов КС-2
@@ -69,7 +70,7 @@ export async function analyzeKs2() {
         updateState('lastKs2SessionId', data.sessionIds?.[0] || null);
         
     } catch (err) {
-        console.error('❌ Ошибка анализа КС-2:', err);
+      
         showError(err.message);
     } finally {
         hideLoading();
@@ -89,7 +90,6 @@ function displayKs2Results(results, totalAmount) {
     const resultsContainer = document.getElementById('results');
     const statsContainer = document.getElementById('stats');
     const emptyState = document.getElementById('emptyState');
-    const tableBody = document.getElementById('tableBody');
     const fullReportBtn = document.getElementById('fullReportBtn');
     const excelReportBtn = document.getElementById('excelReportBtn');
     const resetBtn = document.getElementById('resetBtn');
@@ -149,6 +149,7 @@ function displayKs2Results(results, totalAmount) {
     const withCodeCount = allItems.filter(i => i.code && i.code !== '').length;
     const withDetailsCount = allItems.filter(i => i.details && i.details.length > 0).length;
     const withCoefficientCount = allItems.filter(i => i.coefficient && i.coefficient !== 0 && i.coefficient !== 1).length;
+    const coeffMismatchCount = allItems.filter(i => i.coefficientMatch === false).length;
     
     const statsHtml = `
         <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 20px; padding: 24px; margin-bottom: 24px;">
@@ -163,6 +164,7 @@ function displayKs2Results(results, totalAmount) {
                 ${zeroSumCount > 0 ? ` | ⚠️ С нулевой суммой: ${zeroSumCount}` : ''}
                 ${withDetailsCount > 0 ? ` | 📦 С детализацией: ${withDetailsCount}` : ''}
                 ${withCoefficientCount > 0 ? ` | 📊 С коэффициентом: ${withCoefficientCount}` : ''}
+                ${coeffMismatchCount > 0 ? ` | ⚠️ Расхождения: ${coeffMismatchCount}` : ''}
             </div>
         </div>
         
@@ -189,163 +191,14 @@ function displayKs2Results(results, totalAmount) {
     statsContainer.innerHTML = statsHtml;
     statsContainer.classList.remove('hidden');
     statsContainer.style.display = 'block';
-    
-    // ТАБЛИЦА: № п/п | Шифр | Наименование | Коэффициент | Сумма
-    let tableHtml = '';
-    for (let idx = 0; idx < allItems.length; idx++) {
-        const item = allItems[idx];
-        
-        // Объём под наименованием
-        let volumeHtml = '';
-        if (item.volume) {
-            volumeHtml = `<div style="font-size: 11px; color: #059669; margin-top: 4px;">
-                <i class="fas fa-calculator"></i> ${escapeHtml(item.volume)}
-            </div>`;
-        }
-        
-        // Коэффициент (отдельная колонка)
-        let coefficientHtml = '<span style="color: #9ca3af;">—</span>';
-        if (item.coefficient && item.coefficient !== 0 && item.coefficient !== 1) {
-            const coeffValue = item.coefficient.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
-            // Цвет коэффициента: красный если > 1, зелёный если < 1
-            const coeffColor = item.coefficient > 1 ? '#ef4444' : '#10b981';
-            coefficientHtml = `
-                <div style="display: inline-flex; align-items: center; gap: 6px; background: ${coeffColor}10; padding: 4px 12px; border-radius: 20px; border-left: 3px solid ${coeffColor};">
-                    <i class="fas fa-chart-line" style="color: ${coeffColor}; font-size: 12px;"></i>
-                    <span style="font-weight: 700; color: ${coeffColor};">${coeffValue}</span>
-                </div>
-            `;
-        }
-        
-        const hasDetails = item.details && item.details.length > 0;
-        const details = item.details || [];
-        
-        tableHtml += `
-            <tr class="position-row" data-idx="${idx}" data-position="${item.ks2_position_number}" style="cursor:pointer; border-bottom:1px solid #e2e8f0;">
-                <td style="padding: 12px; vertical-align: middle; width: 100px;">
-                    ${hasDetails ? `<i class="fas fa-chevron-right toggle-icon" id="toggle-icon-${idx}" style="margin-right:6px; transition:transform 0.2s;"></i>` : '<span style="display:inline-block; width:20px;"></span>'}
-                    <span class="position-badge" style="background: #f1f5f9; padding: 4px 10px; border-radius: 20px; font-size: 12px;">${escapeHtml(item.ks2_position_number)}</span>
-                    ${item.estimate_position_number ? 
-                        `<div style="font-size: 10px; color: #6b7280; margin-top: 4px;">поз. ${escapeHtml(item.estimate_position_number)}</div>` : ''}
-                </td>
-                <td style="padding: 12px; vertical-align: middle;">
-                    <code style="font-family: monospace; font-size: 13px; background: #f3f4f6; padding: 4px 8px; border-radius: 6px;">${escapeHtml(item.code || '—')}</code>
-                 </td>
-                <td style="padding: 12px; vertical-align: middle;">
-                    <div style="font-weight: 500;">${escapeHtml(item.name || '—')}</div>
-                    ${volumeHtml}
-                 </td>
-                <td style="padding: 12px; vertical-align: middle; width: 120px; text-align: center;">
-                    ${coefficientHtml}
-                 </td>
-                <td style="padding: 12px; text-align: right; vertical-align: middle; font-weight: 700; ${item.total === 0 ? 'color: #ef4444;' : 'color: #059669;'} white-space: nowrap;">
-                    ${item.total.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
-                 </td>
-             <tr>
-        `;
-        
-        // ДЕТАЛИ (ЗП, ЭМ, МР, НР, СП) - выпадающий список
-        if (hasDetails) {
-            let detailsHtml = '';
-            let detailsTotal = 0;
-            
-            // Группируем детали по типу
-            const grouped = {
-                'ЗП': { amount: 0, items: [], color: '#2563eb', icon: 'fa-user-hard-hat' },
-                'ЭМ': { amount: 0, items: [], color: '#d97706', icon: 'fa-industry' },
-                'МР': { amount: 0, items: [], color: '#059669', icon: 'fa-cubes' },
-                'НР': { amount: 0, items: [], color: '#db2777', icon: 'fa-percent' },
-                'СП': { amount: 0, items: [], color: '#7c3aed', icon: 'fa-chart-simple' },
-                'ЗТР': { amount: 0, items: [], color: '#4b5563', icon: 'fa-clock' },
-                'Прочие': { amount: 0, items: [], color: '#6b7280', icon: 'fa-gear' }
-            };
-            
-            for (const detail of details) {
-                const type = detail.type.toUpperCase();
-                let group = 'Прочие';
-                if (type === 'ЗП' || type.startsWith('ЗП ')) group = 'ЗП';
-                else if (type === 'ЭМ' || type.startsWith('ЭМ ')) group = 'ЭМ';
-                else if (type === 'МР' || type.startsWith('МР ')) group = 'МР';
-                else if (type === 'НР' || type.startsWith('НР ')) group = 'НР';
-                else if (type === 'СП' || type.startsWith('СП ')) group = 'СП';
-                else if (type === 'ЗТР' || type.startsWith('ЗТР ')) group = 'ЗТР';
-                
-                grouped[group].amount += detail.amount;
-                grouped[group].items.push(detail);
-                detailsTotal += detail.amount;
-            }
-            
-            let groupedHtml = '';
-            for (const [groupName, groupData] of Object.entries(grouped)) {
-                if (groupData.amount === 0) continue;
-                groupedHtml += `
-                    <div style="background: ${groupData.color}08; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; border-left: 3px solid ${groupData.color};">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                            <span style="font-weight: 600; color: ${groupData.color};">
-                                <i class="fas ${groupData.icon}" style="margin-right: 6px;"></i>
-                                ${groupName}
-                            </span>
-                            <span style="font-weight: 700; color: ${groupData.color};">
-                                ${groupData.amount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
-                            </span>
-                        </div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: #4b5563;">
-                            ${groupData.items.map(d => `
-                                <span>${escapeHtml(d.type)}: ${d.amount.toLocaleString('ru-RU')} ₽</span>
-                            `).join('')}
-                        </div>
-                    </div>
-                `;
-            }
-            
-            tableHtml += `
-                <tr id="details-row-${idx}" style="display: none; background: #f8fafc;">
-                    <td colspan="5" style="padding: 0;">
-                        <div style="margin: 8px 12px 12px 50px; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #eef2f6;">
-                            <div style="background: #f1f5f9; padding: 10px 16px; font-weight: 600; font-size: 13px; border-bottom: 1px solid #e2e8f0;">
-                                <i class="fas fa-list-ul" style="margin-right: 8px; color: #667eea;"></i> 
-                                Состав работ и затрат (ЗП, ЭМ, МР, НР, СП)
-                                <span style="float: right; color: #10b981;">
-                                    Итого: ${detailsTotal.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
-                                </span>
-                            </div>
-                            <div style="padding: 12px;">
-                                ${groupedHtml}
-                            </div>
-                            <div style="background: #eef2ff; padding: 8px 12px; border-top: 1px solid #e2e8f0; text-align: right;">
-                                <span style="font-weight: 600;">ВСЕГО ПОЗИЦИЯ:</span>
-                                <span style="font-weight: 700; color: #667eea; margin-left: 12px;">
-                                    ${item.total.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
-                                </span>
-                            </div>
-                        </div>
-                      </td>
-                  </tr>
-            `;
-        }
-    }
-    
-    tableBody.innerHTML = tableHtml;
-    
-    // ЗАГОЛОВКИ ТАБЛИЦЫ
-    const thead = document.querySelector('.data-table thead');
-    if (thead) {
-        thead.innerHTML = `
-            <tr>
-                <th style="width: 100px;">№ п/п</th>
-                <th style="width: 180px;">Шифр</th>
-                <th>Наименование работ</th>
-                <th style="width: 120px; text-align: center;">Коэффициент</th>
-                <th style="width: 150px; text-align: right;">Сумма, ₽</th>
-            </tr>
-        `;
-    }
+
+    renderKs2Table(allItems);
     
     resultsContainer.classList.remove('hidden');
     resultsContainer.style.display = 'block';
     emptyState.classList.add('hidden');
     emptyState.style.display = 'none';
-    
+
     if (fullReportBtn) fullReportBtn.classList.add('hidden');
     if (excelReportBtn) excelReportBtn.classList.remove('hidden');
     if (resetBtn) resetBtn.classList.remove('hidden');
@@ -394,45 +247,33 @@ function displayKs2Results(results, totalAmount) {
         }
     }
     
-    attachRowClickHandlers();
-    
-    console.log(`📊 Отображено ${allItems.length} позиций КС-2 из ${filesInfo.length} файлов`);
 }
 
 /**
- * Прикрепление обработчиков клика для строк
+ * Отображение КС-2 сессии из истории
  */
-function attachRowClickHandlers() {
-    const rows = document.querySelectorAll('.position-row');
-    rows.forEach(row => {
-        row.removeEventListener('click', handleRowClick);
-        row.addEventListener('click', handleRowClick);
-    });
-}
-
-/**
- * Обработчик клика по строке (раскрытие/скрытие деталей)
- */
-function handleRowClick(event) {
-    const row = event.currentTarget;
-    const idx = row.dataset.idx;
-    
-    if (idx !== undefined) {
-        const detailsRow = document.getElementById(`details-row-${idx}`);
-        const icon = document.getElementById(`toggle-icon-${idx}`);
-        
-        if (detailsRow && icon) {
-            if (detailsRow.style.display === 'none' || detailsRow.style.display === '') {
-                detailsRow.style.display = 'table-row';
-                icon.classList.remove('fa-chevron-right');
-                icon.classList.add('fa-chevron-down');
-            } else {
-                detailsRow.style.display = 'none';
-                icon.classList.remove('fa-chevron-down');
-                icon.classList.add('fa-chevron-right');
-            }
-        }
+export function displayKs2Session(data) {
+    if (!data || !data.success) {
+        showError('Не удалось загрузить сессию КС-2');
+        return;
     }
+
+    const items = data.items || [];
+    const totalAmount = data.totalAmount ?? data.session?.total_amount ?? items.reduce((sum, i) => sum + (i.total || 0), 0);
+    const fileName = data.session?.filename || data.session?.estimate_name || 'КС-2';
+
+    displayKs2Results([{
+        success: true,
+        fileName,
+        items,
+        totalItems: items.length,
+        totalAmount
+    }], totalAmount);
+
+    updateState('currentResults', items);
+    updateState('currentResultsType', 'ks2');
+    updateState('lastSessionId', data.session?.session_id || null);
+    updateState('currentViewSessionId', data.session?.session_id || null);
 }
 
 /**
@@ -478,7 +319,7 @@ export async function exportKs2ToExcel() {
         showSuccess('Экспорт КС-2 выполнен');
         
     } catch (err) {
-        console.error('Ошибка экспорта:', err);
+   
         showError(err.message);
     } finally {
         hideLoading();

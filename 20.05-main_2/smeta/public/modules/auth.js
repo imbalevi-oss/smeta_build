@@ -79,7 +79,7 @@ export async function login() {
             showLoginError(data.message || 'Неверное имя пользователя или пароль');
         }
     } catch (err) {
-        console.error('Login error:', err);
+        
         showLoginError(err.message || 'Ошибка соединения с сервером');
     }
 }
@@ -89,7 +89,7 @@ export async function logout() {
     try {
         await fetch('/api/logout', { method: 'POST' });
     } catch (err) {
-        console.error('Logout error:', err);
+       
     }
     
     clearTokens();
@@ -149,7 +149,7 @@ export async function checkAuth() {
                 localStorage.removeItem('analyzer_user_id');
             }
         } catch (err) {
-            console.error('Auth check error:', err);
+          
             localStorage.removeItem('analyzer_user_id');
         }
     }

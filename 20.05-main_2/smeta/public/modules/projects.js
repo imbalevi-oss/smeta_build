@@ -27,7 +27,7 @@ export async function loadAllProjects() {
             throw new Error(data.error || 'Ошибка загрузки');
         }
     } catch (error) {
-        console.error('Ошибка загрузки проектов:', error);
+     
         showError('Ошибка загрузки проектов');
         
         const projectsContainer = document.getElementById('projectsList');
@@ -175,7 +175,7 @@ export async function openProject(projectId) {
             throw new Error(data.error || 'Ошибка открытия проекта');
         }
     } catch (error) {
-        console.error('Ошибка открытия проекта:', error);
+       
         showError('Ошибка открытия проекта');
     } finally {
         hideLoading();
@@ -246,7 +246,7 @@ export function showProjectWorkspace(project, session) {
 
 export async function loadProjectHistory() {
     if (!AppState.currentProjectId) {
-        console.warn('⚠️ loadProjectHistory: нет выбранного проекта');
+        
         return;
     }
     
@@ -258,7 +258,7 @@ export async function loadProjectHistory() {
     }
     
     try {
-        console.log(`📡 Загрузка истории для проекта ${AppState.currentProjectId}`);
+        
         
         const response = await fetch(`/api/projects/${AppState.currentProjectId}/sessions`, {
             headers: { 'X-User-Id': AppState.currentUser?.id || '' }
@@ -269,7 +269,7 @@ export async function loadProjectHistory() {
         }
         
         const data = await response.json();
-        console.log('📊 Получены данные истории:', data);
+      
         
         if (data.success) {
             updateState('projectSessions', safeArray(data.sessions));
@@ -280,7 +280,7 @@ export async function loadProjectHistory() {
         }
         
     } catch (error) {
-        console.error('❌ Ошибка загрузки истории:', error);
+        
         if (historyList) {
             historyList.innerHTML = `
                 <div style="padding:40px;text-align:center;">
@@ -334,18 +334,18 @@ function renderHistoryList(sessions, currentSessionId) {
         if (session.status === 'error') statusIcon = '❌';
         else if (session.status === 'started') statusIcon = '⏳';
         
-        // Форматируем сумму
+        // Сумма: для сметы — МР, для КС-2 — итог по документу
+        const displayAmount = isKs2 ? session.total_amount : (session.total_mr_amount ?? session.total_amount);
         let amountFormatted = '—';
-        if (session.total_amount && session.total_amount > 0) {
-            amountFormatted = session.total_amount.toLocaleString('ru-RU', {
+        if (displayAmount && displayAmount > 0) {
+            amountFormatted = displayAmount.toLocaleString('ru-RU', {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
             }) + ' ₽';
         }
         
-        // Сокращаем имя файла
-        let filename = session.filename || 'Без имени';
-        if (filename.length > 50) filename = filename.substring(0, 47) + '...';
+        let displayName = decodeFilename(session.estimate_name || session.filename || 'Без имени');
+        if (displayName.length > 50) displayName = displayName.substring(0, 47) + '...';
         
         html += `
             <div class="history-item ${isActive ? 'active' : ''}" 
@@ -362,7 +362,7 @@ function renderHistoryList(sessions, currentSessionId) {
                                     ${sessionType}
                                 </span>
                                 <span style="font-weight:500; color:#1f2937; font-size:13px; word-break:break-word;">
-                                    ${escapeHtml(filename)}
+                                    ${escapeHtml(displayName)}
                                 </span>
                             </div>
                             <div style="display:flex; gap:12px; font-size:11px; color:#6b7280;">
@@ -401,7 +401,7 @@ export async function viewSessionFromHistory(sessionId) {
         return;
     }
     
-    console.log(`🔍 Просмотр сессии из истории: ${sessionId}`);
+   
     
     try {
         showLoading();
@@ -422,11 +422,11 @@ export async function viewSessionFromHistory(sessionId) {
         }
         
         const isKs2 = sessionInfo.session.is_ks2 === 1;
-        console.log(`📋 Тип сессии: ${isKs2 ? 'КС-2' : 'Смета'}`);
+       
         
         if (isKs2) {
             // Загружаем КС-2 сессию
-            console.log(`📡 Загрузка КС-2 сессии: /api/ks2-sessions/${sessionId}`);
+         
             
             const response = await fetch(`/api/ks2-sessions/${sessionId}`, {
                 headers: { 
@@ -439,7 +439,7 @@ export async function viewSessionFromHistory(sessionId) {
             }
             
             const data = await response.json();
-            console.log('📊 Данные КС-2:', data);
+          
             
             if (data.success) {
                 // Отображаем КС-2 результаты
@@ -474,7 +474,7 @@ export async function viewSessionFromHistory(sessionId) {
         updateHistoryActiveState(sessionId);
         
     } catch (error) {
-        console.error('❌ Ошибка загрузки сессии:', error);
+     
         showError(`Ошибка загрузки: ${error.message}`);
     } finally {
         hideLoading();
@@ -484,7 +484,7 @@ export async function viewSessionFromHistory(sessionId) {
 // projects.js - в функции displayKs2SessionFallback
 
 function displayKs2SessionFallback(data) {
-    console.log('🔄 Используем fallback для отображения КС-2');
+ 
     
     const statsEl = document.getElementById('stats');
     const resultsEl = document.getElementById('results');
@@ -513,115 +513,23 @@ function displayKs2SessionFallback(data) {
     // Отображаем таблицу КС-2
     if (typeof window.renderKs2Table === 'function') {
         window.renderKs2Table(data.items);
-        console.log('✅ Таблица КС-2 отображена');
+        
     } else {
-        console.error('❌ renderKs2Table не определена');
+      
         // Показываем простую таблицу как fallback
         displaySimpleKs2Table(data.items);
     }
 }
 
 function displaySimpleKs2Table(items) {
-    const tableBody = document.getElementById('tableBody');
+    if (typeof window.renderKs2Table === 'function') {
+        window.renderKs2Table(items);
+        return;
+    }
+    const tableBody = document.getElementById('ks2TableBody');
     if (!tableBody) return;
-    
-    let html = '';
-    for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        html += `
-            <tr>
-                <td>${item.ks2_position_number || i+1}</td>
-                <td>${escapeHtml(item.code || '—')}</td>
-                <td>${escapeHtml(item.name || '—')}</td>
-                <td>—</td>
-                <td style="text-align:right">${(item.total || 0).toLocaleString('ru-RU')} ₽</td>
-            </tr>
-        `;
-    }
-    tableBody.innerHTML = html;
+    tableBody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:#9ca3af;">Нет данных для отображения</td></tr>`;
 }
-// Вспомогательная функция для получения проблемных позиций
-function getProblemPositions(codes) {
-    if (!codes || !codes.length) return [];
-    
-    return codes.filter(code => {
-        if (!code) return false;
-        // Текстовая позиция
-        if (code.isText === true || code.is_text === 1 || code.matchType === 'text') return true;
-        // Запрещённая
-        if (code.status === 'Нельзя применять' || code.isRestoration === true || code.is_restoration === 1) return true;
-        // Требует внимания
-        if (code.status === 'Обратите внимание') return true;
-        // Коэффициент не совпадает
-        if (code.coefficientMatch === false) return true;
-        // Не найден
-        if (code.found === false && code.status !== 'Доступен') return true;
-        return false;
-    });
-}
-
-// Вспомогательная функция для отображения статистики сессии
-function displaySessionStats(session) {
-    const statsEl = document.getElementById('stats');
-    if (!statsEl) return;
-    
-    const codes = session.codes || [];
-    const warningCount = codes.filter(c => c.status === 'Обратите внимание' || c.coefficientMatch === false).length;
-    const notAllowedCount = codes.filter(c => c.status === 'Нельзя применять' || c.isRestoration).length;
-    const textCount = codes.filter(c => c.isText || c.matchType === 'text').length;
-    const foundCount = codes.filter(c => c.found !== false && c.status !== 'Нельзя применять' && !c.isText).length;
-    
-    statsEl.innerHTML = `
-        <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:20px;padding:24px;margin-bottom:24px;">
-            <div style="color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:1px;">📊 ИТОГОВАЯ СУММА</div>
-            <div style="color:white;font-size:36px;font-weight:800;">${(session.total_amount || 0).toLocaleString('ru-RU')} ₽</div>
-            <div style="color:rgba(255,255,255,0.6);font-size:12px;margin-top:8px;">📋 Всего позиций: ${codes.length}</div>
-        </div>
-        <div class="stats-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;">
-            <div class="stat-item"><div class="stat-value" style="color:#10b981;">${foundCount}</div><div class="stat-label">✅ Найдено</div></div>
-            <div class="stat-item"><div class="stat-value" style="color:#f59e0b;">${warningCount}</div><div class="stat-label">⚠️ Внимание</div></div>
-            <div class="stat-item"><div class="stat-value" style="color:#ef4444;">${notAllowedCount}</div><div class="stat-label">❌ Запрещены</div></div>
-            <div class="stat-item"><div class="stat-value" style="color:#8b5cf6;">${textCount}</div><div class="stat-label">📝 Цена поставщика</div></div>
-        </div>
-    `;
-    statsEl.classList.remove('hidden');
-    statsEl.style.display = 'block';
-}
-
-// Вспомогательная функция для показа таблицы результатов
-function showResultsTable() {
-    const resultsEl = document.getElementById('results');
-    const emptyStateEl = document.getElementById('emptyState');
-    
-    if (resultsEl) {
-        resultsEl.classList.remove('hidden');
-        resultsEl.style.display = 'block';
-    }
-    if (emptyStateEl) {
-        emptyStateEl.classList.add('hidden');
-        emptyStateEl.style.display = 'none';
-    }
-}
-
-// Вспомогательная функция для показа пустого состояния
-function showEmptyStateMessage(message) {
-    const resultsEl = document.getElementById('results');
-    const emptyStateEl = document.getElementById('emptyState');
-    
-    if (resultsEl) {
-        resultsEl.classList.add('hidden');
-        resultsEl.style.display = 'none';
-    }
-    if (emptyStateEl) {
-        emptyStateEl.classList.remove('hidden');
-        emptyStateEl.style.display = 'block';
-        emptyStateEl.innerHTML = `
-            <div class="empty-icon"><i class="fas fa-check-circle" style="color:#10b981;font-size:48px;"></i></div>
-            <h3 style="font-size:18px;font-weight:600;color:#059669;margin-bottom:8px;">${message}</h3>
-        `;
-    }
-}
-
 // Обновление активного состояния в списке истории
 function updateHistoryActiveState(sessionId) {
     const historyItems = document.querySelectorAll('.history-item');

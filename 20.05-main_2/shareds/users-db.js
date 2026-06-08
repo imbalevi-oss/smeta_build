@@ -35,10 +35,10 @@ async function initUsersDatabase() {
             INSERT INTO users (username, password_hash, institution, fullname, role, created_at)
             VALUES (@p0, @p1, @p2, @p3, @p4, DATEADD(hour, 3, GETUTCDATE()))
         `, ['admin', hash, 'Администрация', 'Главный администратор', 'admin']);
-        console.log('✅ Создан пользователь admin с паролем: admin123');
+       
     }
     
-    console.log('✅ База данных пользователей инициализирована (SHA256)');
+    
 }
 
 // Аутентификация пользователя

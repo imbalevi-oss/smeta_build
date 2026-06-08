@@ -57,12 +57,12 @@ let cacheUpdateInProgress = false;
 
 async function refreshGlobalCache() {
     if (cacheUpdateInProgress) {
-        console.log('⏳ Обновление кэша уже выполняется, пропускаем...');
+        
         return;
     }
     
     cacheUpdateInProgress = true;
-    console.log(`🔄 Обновление глобального кэша кодов...`);
+    
     const start = Date.now();
     
     try {
@@ -75,10 +75,9 @@ async function refreshGlobalCache() {
         codesDb.setGlobalMaps(globalCodesMap, globalHierarchicalMap, globalRelationsMap, globalParentMap);
         
         lastCacheUpdate = new Date();
-        console.log(`✅ Кэш обновлён за ${Date.now() - start}ms`);
-        console.log(`   📊 Кодов в кэше: ${globalCodesMap.size}`);
+    
     } catch (err) {
-        console.error('❌ Ошибка обновления кэша:', err);
+       
     } finally {
         cacheUpdateInProgress = false;
     }
@@ -87,33 +86,27 @@ async function refreshGlobalCache() {
 // Запуск сервера
 async function startServer() {
     try {
-        console.log('\n📂 Инициализация баз данных...');
+        
         await codesDb.initDatabase();
         await usersDb.initUsersDatabase();
         await logsDb.initLogsDatabase();
-        console.log('✅ Базы данных инициализированы');
+      
         
         await refreshGlobalCache();
         setInterval(refreshGlobalCache, 30 * 60 * 1000);
         
         app.listen(PORT, '0.0.0.0', () => {
-            console.log(`\n${'='.repeat(70)}`);
-            console.log(`🚀 СЕРВЕР ЗАПУЩЕН`);
-            console.log(`${'='.repeat(70)}`);
-            console.log(`🌐 Адрес: http://localhost:${PORT}`);
-            console.log(`🔧 Режим проверки: УНИВЕРСАЛЬНЫЙ`);
-            console.log(`📁 Управление проектами: включено`);
-            console.log(`${'='.repeat(70)}\n`);
+    
         });
         
     } catch (err) {
-        console.error('\n❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ:', err);
+     
         process.exit(1);
     }
 }
 
 process.on('SIGINT', () => {
-    console.log('\n🛑 Завершаем работу...');
+    
     process.exit(0);
 });
 

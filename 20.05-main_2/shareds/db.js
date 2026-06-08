@@ -26,9 +26,9 @@ async function getPool() {
         try {
             pool = await sql.connect(config);
             const moscowTime = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
-            console.log(`[${moscowTime}] ✅ Подключение к SQL Server установлено`);
+           
         } catch (err) {
-            console.error('❌ Ошибка подключения к SQL Server:', err.message);
+            
             throw err;
         }
     }
@@ -80,7 +80,7 @@ async function insertAndGetId(sqlString, params = []) {
 }
 async function getOne(sqlString, params = [], options = {}) {
     const rows = await query(sqlString, params, options);
-    console.log('getOne результат:', rows ? rows[0] : null);
+    
     return rows[0] || null;
 }
 async function getLastInsertId() {
@@ -106,13 +106,13 @@ async function run(sqlString, params = [], options = {}) {
         
         try {
             const result = await request.query(modifiedSql);
-            console.log('✅ SQL выполнен успешно, rowsAffected:', result.rowsAffected);
+            
             return {
                 changes: result.rowsAffected ? result.rowsAffected[0] : 0,
                 recordset: result.recordset
             };
         } catch (err) {
-            console.error('❌ Ошибка выполнения SQL:', err.message);
+           
             throw err;
         }
     } else {
@@ -123,7 +123,7 @@ async function run(sqlString, params = [], options = {}) {
                 recordset: result.recordset
             };
         } catch (err) {
-            console.error('❌ Ошибка выполнения SQL:', err.message);
+           
             throw err;
         }
     }
@@ -155,7 +155,7 @@ async function columnExists(tableName, columnName) {
 async function createTableIfNotExists(tableName, createSql) {
     if (!await tableExists(tableName)) {
         await run(createSql);
-        console.log(`📦 Создана таблица ${tableName}`);
+      
     }
 }
 
@@ -163,7 +163,7 @@ async function addColumnIfNotExists(tableName, columnName, columnDef) {
     if (!await columnExists(tableName, columnName)) {
         const alterSql = `ALTER TABLE [${tableName}] ADD ${columnName} ${columnDef}`;
         await run(alterSql);
-        console.log(`📦 Добавлена колонка ${columnName} в таблицу ${tableName}`);
+       
     }
 }
 

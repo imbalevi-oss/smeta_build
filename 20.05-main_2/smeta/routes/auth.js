@@ -38,7 +38,7 @@ router.post('/login', async (req, res) => {
             });
         }
         
-        console.log(`✅ Пользователь ${username} вошел в систему`);
+        
         
         res.json({
             success: true,
@@ -52,7 +52,7 @@ router.post('/login', async (req, res) => {
         });
         
     } catch (err) {
-        console.error('❌ Ошибка входа:', err);
+        
         res.status(500).json({
             success: false,
             error: 'Ошибка сервера',
@@ -93,7 +93,7 @@ router.get('/users/:id', async (req, res) => {
             role: user.role
         });
     } catch (err) {
-        console.error('Ошибка получения пользователя:', err);
+       
         res.status(500).json({
             success: false,
             error: 'Ошибка сервера'
@@ -114,7 +114,7 @@ router.get('/verify', (req, res) => {
  * Выход из системы
  */
 router.post('/logout', (req, res) => {
-    console.log('👋 Пользователь вышел из системы');
+    
     res.json({ success: true, message: 'Выход выполнен' });
 });
 

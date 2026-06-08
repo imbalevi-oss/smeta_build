@@ -160,31 +160,51 @@
                                 <div class="btn-group">
                                     <button id="fullReportBtn" class="btn-icon btn-purple hidden" onclick="generateFullReport()"><i class="fas fa-chart-bar"></i> Полный отчёт</button>
                                     <button id="excelReportBtn" class="btn-icon btn-purple hidden" onclick="downloadExcelReport()"><i class="far fa-file-excel"></i> Excel</button>
+                                    <button id="copyLetterBtn" class="btn-icon btn-primary hidden" onclick="copyFilteredCodes()"><i class="far fa-copy"></i> Скопировать письмо</button>
                                     <button id="resetBtn" class="btn-icon btn-gray hidden" onclick="resetWorkspace()"><i class="fas fa-times"></i> Сброс</button>
                                 </div>
                             </div>
 
-                            <div class="filter-bar">
-                                <span class="filter-label">Фильтр:</span>
-                                <button class="chip active" data-status="warning">⚠️ Обратите внимание</button>
-                                <button class="chip" data-status="notallowed">❌ Нельзя применить</button>
-                                <button class="chip" data-status="textonly">📝 Проверка цены поставщика</button>
+                            <div id="estimateResultsView">
+                                <div class="filter-bar">
+                                    <span class="filter-label">Фильтр:</span>
+                                    <button class="chip active" data-status="warning">⚠️ Обратите внимание</button>
+                                    <button class="chip" data-status="notallowed">❌ Нельзя применить</button>
+                                    <button class="chip" data-status="textonly">📝 Проверка цены поставщика</button>
+                                </div>
+
+                                <div class="table-wrapper">
+                                    <table class="data-table estimate-table">
+                                        <thead id="estimateTableHead">
+                                            <tr>
+                                                <th>№ п/п</th>
+                                                <th>Код</th>
+                                                <th>Наименование</th>
+                                                <th>Статус</th>
+                                                <th>Причина</th>
+                                                <th>Сумма, ₽</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="estimateTableBody"></tbody>
+                                    </table>
+                                </div>
                             </div>
 
-                            <div class="table-wrapper">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>№ п/п</th>
-                                            <th>Код</th>
-                                            <th>Наименование</th>
-                                            <th>Статус</th>
-                                            <th>Причина</th>
-                                            <th>Сумма, ₽</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="tableBody"></tbody>
-                                </table>
+                            <div id="ks2ResultsView" class="hidden" style="display:none;">
+                                <div class="table-wrapper">
+                                    <table class="data-table ks2-table">
+                                        <thead id="ks2TableHead">
+                                            <tr>
+                                                <th style="width: 100px;">№ п/п</th>
+                                                <th style="width: 180px;">Шифр</th>
+                                                <th>Наименование работ</th>
+                                                <th style="width: 120px; text-align: center;">Коэффициент</th>
+                                                <th style="width: 150px; text-align: right;">Сумма, ₽</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="ks2TableBody"></tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     </div>

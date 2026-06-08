@@ -42,7 +42,7 @@ router.get('/projects', requireAuth, async (req, res) => {
         
         res.json({ success: true, projects: projectsWithStats });
     } catch (err) {
-        console.error('Ошибка получения проектов:', err);
+       
         res.status(500).json({ error: err.message });
     }
 });
@@ -65,7 +65,7 @@ router.post('/projects', requireAuth, async (req, res) => {
         
         res.json({ success: true, projectId });
     } catch (err) {
-        console.error('Ошибка создания проекта:', err);
+        
         res.status(500).json({ error: err.message });
     }
 });
@@ -101,7 +101,7 @@ router.get('/projects/:id', requireAuth, async (req, res) => {
             currentSession: session
         });
     } catch (err) {
-        console.error('Ошибка получения проекта:', err);
+       
         res.status(500).json({ error: err.message });
     }
 });
@@ -124,16 +124,21 @@ router.get('/projects/:id/sessions', requireAuth, async (req, res) => {
         const sessions = await logsDb.getProjectSessions(projectId);
         
         // ПРЕОБРАЗУЕМ СУММУ - ЗАМЕНЯЕМ ЗАПЯТУЮ НА ТОЧКУ
+        const parseAmount = (value) => {
+            if (value === null || value === undefined) return null;
+            const parsed = parseFloat(String(value).replace(',', '.'));
+            return isNaN(parsed) ? null : parsed;
+        };
+
         const formattedSessions = sessions.map(session => ({
             ...session,
-            total_amount: session.total_amount !== null && session.total_amount !== undefined
-                ? parseFloat(String(session.total_amount).replace(',', '.'))
-                : null
+            total_amount: parseAmount(session.total_amount),
+            total_mr_amount: parseAmount(session.total_mr_amount)
         }));
         
-        console.log(`✅ Найдено ${formattedSessions.length} сессий для проекта ${projectId}`);
+        
         if (formattedSessions.length > 0) {
-            console.log(`💰 Первая сессия: total_amount=${formattedSessions[0].total_amount}`);
+           
         }
         
         res.json({ 
@@ -142,7 +147,7 @@ router.get('/projects/:id/sessions', requireAuth, async (req, res) => {
             current_session_id: project.current_session_id 
         });
     } catch (err) {
-        console.error('❌ Ошибка получения сессий:', err);
+       
         res.status(500).json({ error: err.message });
     }
 });
@@ -177,7 +182,7 @@ router.get('/projects/:id/sessions/:sessionId', requireAuth, async (req, res) =>
         
         res.json({ success: true, session });
     } catch (err) {
-        console.error('Ошибка получения сессии:', err);
+     
         res.status(500).json({ error: err.message });
     }
 });
@@ -197,7 +202,7 @@ router.post('/projects/:id/archive', requireAuth, async (req, res) => {
         await logsDb.archiveProject(projectId, req.userId);
         res.json({ success: true, message: 'Проект отправлен в архив' });
     } catch (err) {
-        console.error('Ошибка архивации проекта:', err);
+       
         res.status(500).json({ error: err.message });
     }
 });
@@ -217,7 +222,7 @@ router.post('/projects/:id/restore', requireAuth, async (req, res) => {
         await logsDb.restoreProject(projectId, req.userId);
         res.json({ success: true, message: 'Проект восстановлен' });
     } catch (err) {
-        console.error('Ошибка восстановления проекта:', err);
+      
         res.status(500).json({ error: err.message });
     }
 });
@@ -237,7 +242,7 @@ router.delete('/projects/:id', requireAuth, async (req, res) => {
         await logsDb.deleteProject(projectId, req.userId);
         res.json({ success: true, message: 'Проект удалён' });
     } catch (err) {
-        console.error('Ошибка удаления проекта:', err);
+       
         res.status(500).json({ error: err.message });
     }
 });

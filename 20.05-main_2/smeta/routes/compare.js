@@ -73,9 +73,7 @@ router.get('/compare/:projectId', requireAuth, async (req, res) => {
     try {
         const projectId = parseInt(req.params.projectId);
         
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`🔍 СРАВНЕНИЕ для проекта ${projectId}`);
-        console.log(`${'='.repeat(60)}`);
+       
         
         const project = await logsDb.getOne(
             `SELECT * FROM user_projects WHERE id = @p0 AND user_id = @p1`,
@@ -86,7 +84,7 @@ router.get('/compare/:projectId', requireAuth, async (req, res) => {
             return res.json({ success: false, error: 'Проект не найден' });
         }
         
-        console.log(`📁 Проект: ${project.project_name}`);
+        
         
         const estimateSessions = await logsDb.query(`
             SELECT session_id, estimate_name, filename, created_at
@@ -102,8 +100,7 @@ router.get('/compare/:projectId', requireAuth, async (req, res) => {
             ORDER BY created_at DESC
         `, [projectId]);
         
-        console.log(`📊 Найдено смет: ${estimateSessions.length}`);
-        console.log(`📊 Найдено КС-2: ${ks2Sessions.length}`);
+        
         
         if (estimateSessions.length === 0) {
             return res.json({ success: false, error: 'Нет сметы в проекте' });
@@ -198,7 +195,7 @@ router.get('/compare/:projectId', requireAuth, async (req, res) => {
         });
         
     } catch (err) {
-        console.error('❌ Ошибка:', err);
+        
         res.status(500).json({ error: err.message, success: false });
     }
 });
@@ -222,11 +219,7 @@ router.post('/compare-files', upload.fields([
         const estimateDisplayName = getOriginalDisplayName(estimateFile.filename);
         const ks2DisplayName = getOriginalDisplayName(ks2File.filename);
 
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`📊 СРАВНЕНИЕ ФАЙЛОВ`);
-        console.log(`   Смета: ${estimateDisplayName}`);
-        console.log(`   КС-2: ${ks2DisplayName}`);
-        console.log(`${'='.repeat(60)}`);
+       
 
         const estimateBuffer = fs.readFileSync(estimateFile.path);
         const estimateResult = parseEstimate(estimateBuffer, estimateDisplayName);
@@ -242,8 +235,7 @@ router.post('/compare-files', upload.fields([
             throw new Error(`Ошибка парсинга КС-2: ${ks2Result.error}`);
         }
 
-        console.log(`✅ Смета: ${estimateResult.items.length} позиций`);
-        console.log(`✅ КС-2: ${ks2Result.items.length} позиций`);
+        
 
         const estimateMap = new Map();
         for (const item of estimateResult.items) {
@@ -409,14 +401,7 @@ router.post('/compare-files', upload.fields([
             return order[a.status] - order[b.status];
         });
 
-        console.log(`\n📊 РЕЗУЛЬТАТЫ:`);
-        console.log(`   Совпадают по шифрам: ${matchCount}`);
-        console.log(`   Только в смете: ${onlyInEstimate}`);
-        console.log(`   Только в КС-2: ${onlyInKs2}`);
-        console.log(`   Общая сумма сметы: ${totalEstimateSum.toLocaleString('ru-RU')} ₽`);
-        console.log(`   Общая сумма КС-2: ${totalKs2Sum.toLocaleString('ru-RU')} ₽`);
-        console.log(`   ${totalStatusMessage}`);
-        console.log(`${'='.repeat(60)}\n`);
+        
 
         try {
             if (fs.existsSync(estimateFile.path)) fs.unlinkSync(estimateFile.path);
@@ -448,7 +433,7 @@ router.post('/compare-files', upload.fields([
         });
 
     } catch (err) {
-        console.error('❌ Ошибка сравнения:', err);
+        
         
         try {
             if (req.files?.estimateFile?.[0] && fs.existsSync(req.files.estimateFile[0].path)) {
@@ -482,11 +467,9 @@ router.post('/compare-files-multiple', upload.fields([
         const estimateDisplayName = getOriginalDisplayName(estimateFile.filename);
         const ks2DisplayNames = ks2Files.map(f => getOriginalDisplayName(f.filename));
 
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`📊 СРАВНЕНИЕ СМЕТЫ С ${ks2Files.length} ФАЙЛАМИ КС-2`);
-        console.log(`   Смета: ${estimateDisplayName}`);
-        ks2DisplayNames.forEach((name, i) => console.log(`   КС-2 ${i+1}: ${name}`));
-        console.log(`${'='.repeat(60)}`);
+     
+      
+        
 
         const estimateBuffer = fs.readFileSync(estimateFile.path);
         const estimateResult = parseEstimate(estimateBuffer, estimateDisplayName);
@@ -527,7 +510,7 @@ router.post('/compare-files-multiple', upload.fields([
             
             if (ks2Result.success) {
                 ks2Names.push(ks2DisplayName);
-                console.log(`✅ ${ks2DisplayName}: ${ks2Result.items.length} позиций`);
+                
                 
                 for (const item of ks2Result.items) {
                     const code = item.extracted_code || item.code;
@@ -551,7 +534,7 @@ router.post('/compare-files-multiple', upload.fields([
                     }
                 }
             } else {
-                console.log(`❌ Ошибка парсинга ${ks2DisplayName}: ${ks2Result.error}`);
+                
             }
         }
 
@@ -686,14 +669,7 @@ router.post('/compare-files-multiple', upload.fields([
             return order[a.status] - order[b.status];
         });
 
-        console.log(`\n📊 РЕЗУЛЬТАТЫ:`);
-        console.log(`   Совпадают по шифрам: ${matchCount}`);
-        console.log(`   Только в смете: ${onlyInEstimate}`);
-        console.log(`   Только в КС-2: ${onlyInKs2}`);
-        console.log(`   Общая сумма сметы: ${totalEstimateSum.toLocaleString('ru-RU')} ₽`);
-        console.log(`   Общая сумма КС-2: ${totalKs2Sum.toLocaleString('ru-RU')} ₽`);
-        console.log(`   ${totalStatusMessage}`);
-        console.log(`${'='.repeat(60)}\n`);
+       
 
         try {
             if (fs.existsSync(estimateFile.path)) fs.unlinkSync(estimateFile.path);
@@ -728,7 +704,7 @@ router.post('/compare-files-multiple', upload.fields([
         });
 
     } catch (err) {
-        console.error('❌ Ошибка сравнения:', err);
+        
         
         try {
             if (req.files?.estimateFile?.[0] && fs.existsSync(req.files.estimateFile[0].path)) {
@@ -796,7 +772,7 @@ router.post('/compare/export-excel', async (req, res) => {
         res.send(buffer);
         
     } catch (err) {
-        console.error('Ошибка экспорта:', err);
+        
         res.status(500).json({ error: err.message });
     }
 });

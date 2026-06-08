@@ -5,7 +5,7 @@ import { showLoading, hideLoading, showError, showSuccess } from './ui-notificat
 import { escapeHtml } from '../utils/helpers.js';
 
 export async function compareEstimateWithKs2() {
-    console.log('🔍 compareEstimateWithKs2 вызвана');
+    
     
     if (!AppState.currentProjectId) {
         showError('Сначала выберите проект');
@@ -20,7 +20,7 @@ export async function compareEstimateWithKs2() {
         });
         
         const data = await response.json();
-        console.log('📊 Результат сравнения:', data);
+       
         
         if (!data.success) {
             throw new Error(data.error || 'Ошибка сравнения');
@@ -30,7 +30,7 @@ export async function compareEstimateWithKs2() {
         showSuccess(`Сравнение завершено: ${data.stats.match_count} совпадений из ${data.stats.total_codes}`);
         
     } catch (err) {
-        console.error('Ошибка сравнения:', err);
+    
         showError(err.message);
     } finally {
         hideLoading();
@@ -74,7 +74,7 @@ export async function exportComparisonToExcel() {
         showSuccess('Экспорт выполнен');
         
     } catch (err) {
-        console.error('Ошибка экспорта:', err);
+   
         showError(err.message);
     } finally {
         hideLoading();

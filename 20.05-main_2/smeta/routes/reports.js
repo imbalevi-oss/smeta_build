@@ -98,7 +98,7 @@ router.get('/report/:sessionId', optionalAuth, async (req, res) => {
             codes: filteredCodes
         });
     } catch (err) {
-        console.error('Ошибка получения отчёта:', err);
+        
         res.status(500).json({ error: err.message });
     }
 });
@@ -238,7 +238,7 @@ router.get('/report/:sessionId/html', optionalAuth, async (req, res) => {
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.send(html);
     } catch (err) {
-        console.error('Ошибка генерации HTML отчёта:', err);
+        
         res.status(500).json({ error: err.message });
     }
 });
@@ -294,7 +294,7 @@ router.post('/report/:sessionId/excel', optionalAuth, async (req, res) => {
         res.setHeader('Content-Disposition', `attachment; filename="report_${sessionId}.xlsx"`);
         res.send(buffer);
     } catch (err) {
-        console.error('Ошибка генерации Excel отчёта:', err);
+        
         res.status(500).json({ error: err.message });
     }
 });

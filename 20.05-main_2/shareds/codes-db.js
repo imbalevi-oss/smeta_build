@@ -179,8 +179,6 @@ async function initDatabase() {
     await addColumnIfNotExists('parent_codes', 'check_coefficient', 'INT DEFAULT 0');
     await addColumnIfNotExists('code_relations', 'extended_type', 'INT DEFAULT 0');
     await addColumnIfNotExists('code_relations', 'conditions', 'NVARCHAR(MAX)');
-
-    console.log('✅ База данных кодов инициализирована (MS SQL) с московским временем');
 }
 
 // ==================== МАССОВАЯ ВЫГРУЗКА ДЛЯ КЭША ====================
@@ -237,13 +235,11 @@ async function findExactCodeById(id) {
 }
 
 async function addExactCode(codeData) {
-    console.log('🔵 addExactCode START');
-    console.log('Code:', codeData.Code);
-    console.log('Description:', codeData.Description);
+
     
     try {
         const normalized = normalizeCode(codeData.Code);
-        console.log('Normalized:', normalized);
+     
         
         const parsed = parseCodeStructure(codeData.Code);
         const isRestoration = codeData.IsRestoration !== undefined ? codeData.IsRestoration : isRestorationCode(codeData.Code);
@@ -255,7 +251,7 @@ async function addExactCode(codeData) {
 
         const exists = await getOne(`SELECT id FROM codes WHERE normalized_code = @p0`, [normalized]);
         if (exists) {
-            console.log('Code already exists, returning null');
+           
             return null;
         }
 
@@ -276,7 +272,7 @@ async function addExactCode(codeData) {
             parsed ? parsed.standard : null
         ];
         
-        console.log('Executing INSERT with OUTPUT...');
+       
         
         const pool = await db.getPool();
         const request = pool.request();
@@ -286,18 +282,17 @@ async function addExactCode(codeData) {
         });
         
         const result = await request.query(insertSql);
-        console.log('Query result:', result);
+   
         
         let id = null;
         if (result.recordset && result.recordset[0] && result.recordset[0].id) {
             id = result.recordset[0].id;
         }
         
-        console.log('Final ID:', id);
+       
         return id;
     } catch (error) {
-        console.error('❌ addExactCode ERROR:', error.message);
-        console.error('Stack:', error.stack);
+      
         throw error;
     }
 }
@@ -372,26 +367,26 @@ async function findHierarchicalCodeByCodeAndLevel(code, level) {
 }
 
 async function addHierarchicalCode(codeData) {
-    console.log('🔵 addHierarchicalCode вызвана с данными:', JSON.stringify(codeData, null, 2));
+    
     
     try {
         const normalized = normalizeCode(codeData.Code);
-        console.log('Нормализованный код:', normalized);
+       
         
         const parsed = parseCodeStructure(normalized);
-        console.log('Распарсенная структура:', parsed);
+      
 
         if (!parsed) {
-            console.log('⚠️ Не удалось распарсить код, пробуем простые форматы');
+           
             
             const simpleMatch = normalized.match(/^(\d+)$/);
             if (simpleMatch) {
-                console.log('Обнаружен формат главы');
+               
                 const chapter = parseInt(simpleMatch[1]);
                 
                 const exists = await getOne(`SELECT id FROM hierarchical_codes WHERE level = 1 AND chapter = @p0`, [chapter]);
                 if (exists) {
-                    console.log('Глава уже существует');
+                   
                     return null;
                 }
                 
@@ -418,20 +413,20 @@ async function addHierarchicalCode(codeData) {
                     id = lastId ? lastId.id : null;
                 }
                 
-                console.log(`✅ Глава добавлена с ID: ${id}`);
+               
                 return id;
             }
             
             const collectionMatch = normalized.match(/^(\d+)\.(\d+)$/);
             if (collectionMatch) {
-                console.log('Обнаружен формат сборника');
+                
                 const chapter = parseInt(collectionMatch[1]);
                 const collection = parseInt(collectionMatch[2]);
                 
                 const parent = await getHierarchicalCodeByLevel(1, chapter);
                 const exists = await getOne(`SELECT id FROM hierarchical_codes WHERE level = 2 AND chapter = @p0 AND collection = @p1`, [chapter, collection]);
                 if (exists) {
-                    console.log('Сборник уже существует');
+                   
                     return null;
                 }
                 
@@ -457,13 +452,13 @@ async function addHierarchicalCode(codeData) {
                     id = lastId ? lastId.id : null;
                 }
                 
-                console.log(`✅ Сборник добавлен с ID: ${id}`);
+                
                 return id;
             }
             
             const sectionMatch = normalized.match(/^(\d+)\.(\d+)-(\d+)$/);
             if (sectionMatch) {
-                console.log('Обнаружен формат отдела/раздела');
+               
                 const chapter = parseInt(sectionMatch[1]);
                 const collection = parseInt(sectionMatch[2]);
                 const section = parseInt(sectionMatch[3]);
@@ -471,7 +466,7 @@ async function addHierarchicalCode(codeData) {
                 const parent = await getHierarchicalCodeByLevel(2, chapter, collection);
                 const exists = await getOne(`SELECT id FROM hierarchical_codes WHERE level = 3 AND chapter = @p0 AND collection = @p1 AND section = @p2`, [chapter, collection, section]);
                 if (exists) {
-                    console.log('Отдел уже существует');
+                  
                     return null;
                 }
                 
@@ -497,13 +492,13 @@ async function addHierarchicalCode(codeData) {
                     id = lastId ? lastId.id : null;
                 }
                 
-                console.log(`✅ Отдел добавлен с ID: ${id}`);
+             
                 return id;
             }
             
             const tableMatch = normalized.match(/^(\d+)\.(\d+)-(\d+)-(\d+)$/);
             if (tableMatch) {
-                console.log('Обнаружен формат таблицы');
+                
                 const chapter = parseInt(tableMatch[1]);
                 const collection = parseInt(tableMatch[2]);
                 const section = parseInt(tableMatch[3]);
@@ -512,7 +507,7 @@ async function addHierarchicalCode(codeData) {
                 const parent = await getHierarchicalCodeByLevel(3, chapter, collection, section);
                 const exists = await getOne(`SELECT id FROM hierarchical_codes WHERE level = 4 AND chapter = @p0 AND collection = @p1 AND section = @p2 AND table_num = @p3`, [chapter, collection, section, tableNum]);
                 if (exists) {
-                    console.log('Таблица уже существует');
+                    
                     return null;
                 }
                 
@@ -538,7 +533,7 @@ async function addHierarchicalCode(codeData) {
                     id = lastId ? lastId.id : null;
                 }
                 
-                console.log(`✅ Таблица добавлена с ID: ${id}`);
+                
                 return id;
             }
             
@@ -580,7 +575,7 @@ async function addHierarchicalCode(codeData) {
         `, [level, parsed.chapter, parsed.collection || null, parsed.section || null, parsed.table_num || null]);
         
         if (exists) {
-            console.log('Код уже существует (через parseCodeStructure)');
+           
             return null;
         }
 
@@ -609,12 +604,10 @@ async function addHierarchicalCode(codeData) {
             id = lastId ? lastId.id : null;
         }
         
-        console.log(`✅ Иерархический код добавлен с ID: ${id}`);
+    
         return id;
     } catch (error) {
-        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА в addHierarchicalCode:');
-        console.error('Error:', error);
-        console.error('Stack:', error.stack);
+
         throw error;
     }
 }
@@ -917,7 +910,7 @@ async function checkRelationsInSession(codes, sessionCache = null) {
                 let conditions = {};
                 try {
                     conditions = relation.conditions ? JSON.parse(relation.conditions) : {};
-                } catch(e) { console.error('Ошибка парсинга условий:', e); }
+                } catch(e) {  }
                 
                 const expectedMin = conditions.expectedCoefficientRange?.min || 0.8;
                 const expectedMax = conditions.expectedCoefficientRange?.max || 1.2;
@@ -956,7 +949,7 @@ async function checkRelationsInSession(codes, sessionCache = null) {
                 let conds = {};
                 try {
                     conds = relation.conditions ? JSON.parse(relation.conditions) : {};
-                } catch(e) { console.error('Ошибка парсинга условий:', e); }
+                } catch(e) { }
                 
                 for (const code of [...sourceMatches, ...targetMatches]) {
                     const coeff = code.actualCoefficient || 1;
@@ -1039,7 +1032,7 @@ async function checkRelationsInSession(codes, sessionCache = null) {
                 let conditions = {};
                 try {
                     conditions = group.conditions ? JSON.parse(group.conditions) : {};
-                } catch(e) { console.error('Ошибка парсинга условий:', e); }
+                } catch(e) {  }
                 
                 const expectedMin = conditions.expectedCoefficientRange?.min || 0.8;
                 const expectedMax = conditions.expectedCoefficientRange?.max || 1.2;
@@ -1079,7 +1072,7 @@ async function checkRelationsInSession(codes, sessionCache = null) {
                 let conds = {};
                 try {
                     conds = group.conditions ? JSON.parse(group.conditions) : {};
-                } catch(e) { console.error('Ошибка парсинга условий:', e); }
+                } catch(e) {  }
                 
                 for (const code of sourceMatches) {
                     const coeff = code.actualCoefficient || 1;

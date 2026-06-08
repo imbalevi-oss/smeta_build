@@ -6,11 +6,40 @@ import { safeArray, safeNumber, escapeHtml, formatNumber, getProblemReason, safe
 
 let activePopup = null;
 
+export function showEstimateResultsView() {
+    const estimateView = document.getElementById('estimateResultsView');
+    const ks2View = document.getElementById('ks2ResultsView');
+    if (estimateView) {
+        estimateView.classList.remove('hidden');
+        estimateView.style.display = 'block';
+    }
+    if (ks2View) {
+        ks2View.classList.add('hidden');
+        ks2View.style.display = 'none';
+    }
+    updateState('currentResultsType', 'estimate');
+}
+
+export function showKs2ResultsView() {
+    const estimateView = document.getElementById('estimateResultsView');
+    const ks2View = document.getElementById('ks2ResultsView');
+    if (estimateView) {
+        estimateView.classList.add('hidden');
+        estimateView.style.display = 'none';
+    }
+    if (ks2View) {
+        ks2View.classList.remove('hidden');
+        ks2View.style.display = 'block';
+    }
+    updateState('currentResultsType', 'ks2');
+}
+
 function formatCoefficient(value) {
     if (value === null || value === undefined) return '';
     const num = parseFloat(value);
     if (isNaN(num)) return String(value);
-    let formatted = num.toFixed(3).replace(/\.?0+$/, '');
+    // Округляем до 2 знаков и убираем лишние нули в конце
+    let formatted = num.toFixed(2).replace(/\.?0+$/, '');
     if (formatted === '') formatted = '0';
     return formatted;
 }
@@ -299,13 +328,14 @@ function renderDetailsBlock(details, totalAmount, idx) {
 // public/modules/results-renderer.js
 
 export function renderUnifiedTable(positions) {
-    const tableBody = document.getElementById('tableBody');
+    showEstimateResultsView();
+    const tableBody = document.getElementById('estimateTableBody');
     if (!tableBody) return;
     
     const safePositions = safeArray(positions);
     
     if (safePositions.length === 0) {
-        tableBody.innerHTML = '<td><td colspan="6" style="text-align:center;padding:60px;color:#9ca3af;">✅ Проблемные позиции не найдены</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:60px;color:#9ca3af;">✅ Проблемные позиции не найдены</td></tr>';
         return;
     }
     
@@ -390,7 +420,7 @@ function attachCoefficientClickHandlers() {
 }
 
 function attachRowClickHandlers() {
-    const rows = document.querySelectorAll('.position-row');
+    const rows = document.querySelectorAll('#estimateResultsView .position-row');
     rows.forEach(row => {
         row.removeEventListener('click', handleRowClick);
         row.addEventListener('click', handleRowClick);
@@ -421,7 +451,8 @@ function handleRowClick(event) {
 export function filterAndDisplayResults() {
     if (!AppState.currentResults) updateState('currentResults', []);
     if (!Array.isArray(AppState.currentResults) || AppState.currentResults.length === 0) {
-        const tableBody = document.getElementById('tableBody');
+        showEstimateResultsView();
+        const tableBody = document.getElementById('estimateTableBody');
         if (tableBody) {
             tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:60px;color:#9ca3af;">Нет данных для отображения</td></tr>';
         }
@@ -456,7 +487,7 @@ export function filterAndDisplayResults() {
             filtered = AppState.currentResults.filter(c => c);
             break;
     }
-    console.log(`📊 Фильтр ${AppState.currentFilter}: показано ${filtered.length} из ${AppState.currentResults.length} позиций`);
+   
     renderUnifiedTable(filtered);
     showReasonsSummary(filtered);
     updateFilterChipsActive();
@@ -475,7 +506,8 @@ function updateFilterChipsActive() {
  * @param {Array} items - Позиции КС-2
  */
 export function renderKs2Table(items) {
-    const tableBody = document.getElementById('tableBody');
+    showKs2ResultsView();
+    const tableBody = document.getElementById('ks2TableBody');
     if (!tableBody) return;
     
     const safeItems = safeArray(items);
@@ -483,20 +515,6 @@ export function renderKs2Table(items) {
     if (safeItems.length === 0) {
         tableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:60px;color:#9ca3af;">📄 Нет данных КС-2</td></tr>';
         return;
-    }
-    
-    // Обновляем заголовки таблицы для КС-2
-    const thead = document.querySelector('.data-table thead');
-    if (thead) {
-        thead.innerHTML = `
-            <tr>
-                <th style="width: 80px;">№ п/п</th>
-                <th style="width: 180px;">Шифр</th>
-                <th>Наименование работ</th>
-                <th style="width: 100px; text-align: center;">Коэф.</th>
-                <th style="width: 150px; text-align: right;">Сумма, ₽</th>
-            </tr>
-        `;
     }
     
     let html = '';
@@ -516,12 +534,18 @@ export function renderKs2Table(items) {
             maximumFractionDigits: 2 
         });
         
-        // Форматируем коэффициент
+        const expected = item.expectedCoefficient;
+        const mismatch = item.coefficientMatch === false;
         let coeffHtml = '—';
         if (coefficient && coefficient !== 0 && coefficient !== 1) {
             const coeffValue = coefficient.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
-            const coeffColor = coefficient > 1 ? '#ef4444' : '#10b981';
+            const coeffColor = mismatch ? '#ef4444' : (coefficient > 1 ? '#ef4444' : '#10b981');
             coeffHtml = `<span style="color: ${coeffColor}; font-weight: 600;">${coeffValue}</span>`;
+            if (expected && expected !== 1 && Math.abs(coefficient - expected) > 0.01) {
+                coeffHtml += `<div style="font-size:10px;color:#6b7280;">норма ${expected.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}</div>`;
+            }
+        } else if (expected && expected !== 1) {
+            coeffHtml = `<span style="color:#ef4444;font-weight:600;">⚠️</span><div style="font-size:10px;">ожид. ${expected.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}</div>`;
         }
         
         // Объём (если есть)
@@ -530,18 +554,21 @@ export function renderKs2Table(items) {
             volumeHtml = `<div style="font-size: 11px; color: #059669; margin-top: 4px;"><i class="fas fa-calculator"></i> ${escapeHtml(item.volume)}</div>`;
         }
         
-        const hasDetails = item.details && item.details.length > 0;
+        const details = Array.isArray(item.details) ? item.details : [];
+        const hasDetails = details.length > 0 || item.hasDetails === true;
         
         html += `
             <tr class="position-row" data-idx="${idx}" data-is-ks2="true" style="cursor:pointer;">
                 <td style="padding: 12px; vertical-align: middle;">
                     ${hasDetails ? `<i class="fas fa-chevron-right toggle-icon" id="toggle-icon-ks2-${idx}" style="margin-right: 8px;"></i>` : ''}
                     <span class="position-badge">${escapeHtml(String(positionNumber))}</span>
+                    ${item.estimate_position_number ? `<div style="font-size:10px;color:#6b7280;margin-top:4px;">поз. ${escapeHtml(item.estimate_position_number)}</div>` : ''}
                 </td>
                 <td style="padding: 12px; font-family: monospace;">${escapeHtml(code)}</td>
                 <td style="padding: 12px;">
                     <div style="font-weight: 500;">${escapeHtml(name)}</div>
                     ${volumeHtml}
+                    ${mismatch && item.description ? `<div style="font-size:11px;color:#b45309;margin-top:4px;">${escapeHtml(String(item.description).substring(0, 80))}</div>` : ''}
                 </td>
                 <td style="padding: 12px; text-align: center;">${coeffHtml}</td>
                 <td style="padding: 12px; text-align: right; font-weight: 700;">${totalFormatted} ₽</td>
@@ -550,7 +577,7 @@ export function renderKs2Table(items) {
         
         // Детали (ЗП, ЭМ, МР, НР, СП)
         if (hasDetails) {
-            html += renderKs2DetailsBlock(item.details, item.total, idx);
+            html += renderKs2DetailsBlock(details, item.total, idx);
         }
     }
     
@@ -639,7 +666,7 @@ function renderKs2DetailsBlock(details, totalAmount, idx) {
  * Прикрепление обработчиков для строк КС-2
  */
 function attachKs2RowClickHandlers() {
-    const rows = document.querySelectorAll('.position-row');
+    const rows = document.querySelectorAll('#ks2ResultsView .position-row');
     rows.forEach(row => {
         row.removeEventListener('click', handleKs2RowClick);
         row.addEventListener('click', handleKs2RowClick);

@@ -86,7 +86,7 @@ export function switchCheckMode(mode) {
 // components/navigation.js - только функция initEventListeners
 
 export function initEventListeners() {
-    console.log('🔧 initEventListeners вызвана');
+   
     
     // Переключение вкладок
     document.querySelectorAll('.tab').forEach(tab => {
@@ -129,19 +129,19 @@ export function initEventListeners() {
     // ✅ КНОПКА СРАВНЕНИЯ
     const compareBtn = document.getElementById('compareBtn');
     if (compareBtn) {
-        console.log('🔘 Кнопка сравнения найдена, добавляем обработчик');
+       
         compareBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            console.log('🖱️ Кнопка сравнения нажата');
+       
             if (typeof window.compareEstimateWithKs2 === 'function') {
                 window.compareEstimateWithKs2();
             } else {
-                console.error('❌ window.compareEstimateWithKs2 не функция, тип:', typeof window.compareEstimateWithKs2);
+             
                 showError('Функция сравнения не загружена. Обновите страницу.');
             }
         });
     } else {
-        console.warn('⚠️ Кнопка сравнения #compareBtn не найдена в DOM');
+        
     }
     
     // Зона сметы
@@ -268,5 +268,5 @@ export function initEventListeners() {
         });
     }
     
-    console.log('✅ initEventListeners завершена');
+   
 }

@@ -10,6 +10,7 @@ const logsDb = require('../../shareds/logs-db');
 const usersDb = require('../../shareds/users-db');
 const codesDb = require('../../shareds/codes-db');
 const { parseEstimate, extractCodeFromStrings } = require('../../shareds/estimate-parser');
+const { evaluateCoefficientAnalysis } = require('../../shareds/coefficient-analyzer');
 const router = express.Router();
 const iconv = require('iconv-lite');
 
@@ -80,6 +81,7 @@ const upload = multer({
 });
 
 // ==================== АНАЛИЗ СМЕТЫ ====================
+// ==================== АНАЛИЗ СМЕТЫ ====================
 router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
     upload.single('file')(req, res, async (err) => {
         if (err) return res.status(400).json({ error: err.message });
@@ -92,11 +94,9 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
         const userId = req.userId;
 
         try {
-            console.log(`\n${'='.repeat(80)}`);
-            console.log(`📊 АНАЛИЗ СМЕТЫ: ${displayName}`);
-            console.log(`👤 Пользователь ID: ${userId}, Проект ID: ${projectId || 'новый'}`);
-            console.log(`🔄 Исправленная: ${isRevised}`);
-            console.log(`${'='.repeat(80)}`);
+            console.log(`\n========== АНАЛИЗ СМЕТЫ ==========`);
+            console.log(`Файл: ${displayName}`);
+            console.log(`Проект ID: ${projectId}`);
 
             const parseResult = parseEstimate(fileBuffer, displayName);
             
@@ -105,8 +105,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
             }
 
             const parsedPositions = parseResult.items;
-            console.log(`✅ Распознано позиций: ${parsedPositions.length}`);
-            console.log(`💰 Общая сумма по смете: ${parseResult.totalAmountFormatted} ₽`);
+            console.log(`Парсинг завершён. Найдено позиций: ${parsedPositions.length}`);
 
             const sessionCodeCache = new Map();
             const analyzedPositions = [];
@@ -117,7 +116,19 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 const positionNumber = pos.positionNumber;
                 const codeRaw = pos.code;
                 const totalAmount = pos.totalAmount;
-                const actualCoefficient = pos.coefficient;
+                
+                // НОРМАЛИЗАЦИЯ КОЭФФИЦИЕНТА СМЕТЫ
+                let actualCoefficient = pos.coefficient;
+                console.log(`[analyze] Позиция ${positionNumber}: оригинальный коэффициент = ${actualCoefficient}`);
+                
+                if (actualCoefficient !== null && actualCoefficient !== undefined && actualCoefficient !== 1) {
+                    const original = actualCoefficient;
+                    actualCoefficient = Math.round(actualCoefficient * 100) / 100;
+                    if (original !== actualCoefficient) {
+                        console.log(`[analyze] Позиция ${positionNumber}: нормализация ${original} -> ${actualCoefficient}`);
+                    }
+                }
+                
                 const quantity = pos.quantity;
                 const unit = pos.unit;
                 const name = pos.name;
@@ -127,13 +138,6 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
 
                 const { code: extractedCode } = extractCodeFromStrings(codeRaw);
                 const isTextPosition = pos.isTextPosition || (!extractedCode && codeRaw && codeRaw.length > 0 && !/^\d/.test(codeRaw));
-
-                console.log(`\n🔍 Позиция ${positionNumber} (строка ${pos.rowNumber})`);
-                console.log(`   Исходный код: ${codeRaw?.substring(0, 60)}`);
-                console.log(`   Извлечённый код: ${extractedCode || '—'}`);
-                console.log(`   Сумма: ${totalAmount?.toLocaleString('ru-RU') || 0} ₽`);
-                console.log(`   Коэффициент: ${actualCoefficient !== null ? actualCoefficient : '—'}`);
-                console.log(`   Объём: ${formattedVolume || 'не задан'}`);
 
                 if (isTextPosition) {
                     textCount++;
@@ -226,29 +230,39 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                     matchType = found.matchType;
                     isRestoration = (found.matchType === 'restoration');
                     expectedCoefficient = found.coefficient_value;
+                    
+                    // НОРМАЛИЗАЦИЯ ОЖИДАЕМОГО КОЭФФИЦИЕНТА ИЗ БД
+                    if (expectedCoefficient !== null && expectedCoefficient !== undefined && expectedCoefficient !== 1) {
+                        expectedCoefficient = Math.round(expectedCoefficient * 100) / 100;
+                        console.log(`[analyze] Позиция ${positionNumber}: ожидаемый коэффициент из БД = ${expectedCoefficient}`);
+                    }
                 }
 
                 const actual = actualCoefficient !== null ? parseFloat(actualCoefficient) : null;
                 const expected = expectedCoefficient ? parseFloat(expectedCoefficient) : null;
                 const TOLERANCE = 0.01;
 
+                console.log(`[analyze] Позиция ${positionNumber}: actual=${actual}, expected=${expected}`);
+
                 if (actual !== null) {
                     if (actual < 1) {
                         category = 'ok';
                         status = 'Доступен';
                         coefficientMatch = null;
-                        description = `📉 Понижающий коэффициент: ${actual.toFixed(3)} (допустимо)`;
+                        description = `📉 Понижающий коэффициент: ${actual.toFixed(2)} (допустимо)`;
                         if (expected && expected > 1 && actual < expected) {
-                            description += `, ожидался ${expected.toFixed(3)}`;
+                            description += `, ожидался ${expected.toFixed(2)}`;
                         }
+                        console.log(`[analyze] Позиция ${positionNumber}: понижающий коэффициент ${actual}`);
                     } 
                     else if (actual === 1) {
                         if (expected && expected !== 1) {
                             category = 'warning';
                             status = 'Обратите внимание';
                             coefficientMatch = false;
-                            description = `⚠️ Отсутствует обязательный коэффициент. Ожидается ${expected.toFixed(3)}.`;
+                            description = `⚠️ Отсутствует обязательный коэффициент. Ожидается ${expected.toFixed(2)}.`;
                             coefficientMismatches++;
+                            console.log(`[analyze] Позиция ${positionNumber}: ОТСУТСТВУЕТ обязательный коэффициент ${expected}`);
                         } else {
                             description = `✅ Коэффициент 1 (норма)`;
                         }
@@ -259,30 +273,35 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                                 category = 'warning';
                                 status = 'Обратите внимание';
                                 coefficientMatch = false;
-                                description = `⚠️ Коэффициент ${actual.toFixed(3)} превышает допустимый (${expected.toFixed(3)}).`;
+                                description = `⚠️ Коэффициент ${actual.toFixed(2)} превышает допустимый (${expected.toFixed(2)}).`;
                                 coefficientMismatches++;
+                                console.log(`[analyze] Позиция ${positionNumber}: ПРЕВЫШЕНИЕ ${actual} > ${expected}`);
                             } else if (Math.abs(actual - expected) <= TOLERANCE) {
                                 coefficientMatch = true;
-                                description = `✅ Коэффициент ${actual.toFixed(3)} соответствует норме (${expected.toFixed(3)})`;
+                                description = `✅ Коэффициент ${actual.toFixed(2)} соответствует норме (${expected.toFixed(2)})`;
                                 coefficientMatches++;
+                                console.log(`[analyze] Позиция ${positionNumber}: СОВПАДЕНИЕ ${actual} = ${expected}`);
                             } else {
                                 coefficientMatch = null;
-                                description = `ℹ️ Коэффициент ${actual.toFixed(3)} ниже ожидаемого (${expected.toFixed(3)}), но допустим.`;
+                                description = `ℹ️ Коэффициент ${actual.toFixed(2)} ниже ожидаемого (${expected.toFixed(2)}), но допустим.`;
+                                console.log(`[analyze] Позиция ${positionNumber}: НИЖЕ ${actual} < ${expected}`);
                             }
                         } else {
                             category = 'warning';
                             status = 'Обратите внимание';
                             coefficientMatch = false;
-                            description = `⚠️ Коэффициент ${actual.toFixed(3)} больше 1. Требуется обоснование.`;
+                            description = `⚠️ Коэффициент ${actual.toFixed(2)} больше 1. Требуется обоснование.`;
                             coefficientMismatches++;
+                            console.log(`[analyze] Позиция ${positionNumber}: КОЭФФИЦИЕНТ >1 без нормы ${actual}`);
                         }
                     }
                 } else if (expected && expected !== 1) {
                     category = 'warning';
                     status = 'Обратите внимание';
                     coefficientMatch = false;
-                    description = `⚠️ Отсутствует обязательный коэффициент. Ожидается ${expected.toFixed(3)}.`;
+                    description = `⚠️ Отсутствует обязательный коэффициент. Ожидается ${expected.toFixed(2)}.`;
                     coefficientMismatches++;
+                    console.log(`[analyze] Позиция ${positionNumber}: КОЭФФИЦИЕНТ ОТСУТСТВУЕТ, ожидается ${expected}`);
                 }
 
                 if (isRestoration) {
@@ -290,6 +309,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                     status = 'Нельзя применять';
                     description = '🏛️ Реставрационные работы (отделы 51-59). Применение запрещено.';
                     coefficientMatch = null;
+                    console.log(`[analyze] Позиция ${positionNumber}: РЕСТАВРАЦИОННЫЙ КОД`);
                 }
 
                 if (category === 'warning') warningCount++;
@@ -331,42 +351,54 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 });
             }
 
+            // ВЫВОД СТАТИСТИКИ ПО КОЭФФИЦИЕНТАМ
+            console.log(`\n========== СТАТИСТИКА КОЭФФИЦИЕНТОВ ==========`);
+            console.log(`Всего позиций: ${analyzedPositions.length}`);
+            console.log(`С коэффициентами: ${analyzedPositions.filter(p => p.hasCoefficient).length}`);
+            console.log(`Коэффициенты совпадают: ${coefficientMatches}`);
+            console.log(`Коэффициенты НЕ совпадают: ${coefficientMismatches}`);
+            console.log(`Предупреждений: ${warningCount}`);
+            console.log(`Запрещено: ${notAllowedCount}`);
+            console.log(`=============================================\n`);
+
+            // ... остальной код без изменений (создание сессии, сохранение в БД, ответ)
+            
+            const totalMrAmount = parsedPositions.reduce((sum, p) => sum + (p.mrTotalAmount || 0), 0);
+            const totalMrRows = parsedPositions.reduce((sum, p) => sum + (p.mrDetails?.length || 0), 0);
+            const positionsWithMr = parsedPositions.filter(p => (p.mrDetails?.length || 0) > 0).length;
+
             const user = await usersDb.getUserById(userId);
             const sessionId = Date.now() + '-' + Math.random().toString(36).substr(2, 8);
+            const estimateName = parseResult.sheetName || 'Смета';
             
             await logsDb.createSession(sessionId, {
                 user: { fullname: user.fullname, institution: user.institution },
                 ip: req.ip,
                 filename: displayName,
-                estimateName: parseResult.sheetName || 'Смета',
+                estimateName,
                 isRevised,
                 totalCodes: analyzedPositions.length,
                 foundCodes: foundCount,
                 notFoundCodes: notFoundCount,
                 totalAmount: parseResult.totalAmount,
+                totalMrAmount,
+                totalMrRows,
+                positionsWithMr,
                 status: 'completed',
                 project_id: projectId
             });
-
-            console.log(`\n💾 СОХРАНЯЕМ ДЕТАЛИ КОДОВ: ${analyzedPositions.length} позиций`);
             
             await logsDb.addCodeDetailsBatch(sessionId, analyzedPositions);
-            console.log(`✅ ДЕТАЛИ СОХРАНЕНЫ`);
 
-            const totalMrAmount = parsedPositions.reduce((sum, p) => sum + (p.mrTotalAmount || 0), 0);
-            const totalMrRows = parsedPositions.reduce((sum, p) => sum + (p.mrDetails?.length || 0), 0);
-            const positionsWithMr = parsedPositions.filter(p => (p.mrDetails?.length || 0) > 0).length;
-
-            console.log(`\n📊 ИТОГИ АНАЛИЗА СМЕТЫ:`);
-            console.log(`   Всего позиций: ${analyzedPositions.length}`);
-            console.log(`   ✅ Найдено в БД: ${foundCount}`);
-            console.log(`   ❌ Не найдено: ${notFoundCount}`);
-            console.log(`   ⚠️ Требуют внимания: ${warningCount}`);
-            console.log(`   🚫 Нельзя применять: ${notAllowedCount}`);
-            console.log(`   📝 Текстовых: ${textCount}`);
-            console.log(`   📈 Коэффициентов верно: ${coefficientMatches}`);
-            console.log(`   📉 Коэффициентов неверно: ${coefficientMismatches}`);
-            console.log(`   💰 ОБЩАЯ СУММА: ${parseResult.totalAmount.toLocaleString('ru-RU')} ₽`);
+            if (projectId) {
+                await logsDb.updateProjectSession(
+                    projectId,
+                    userId,
+                    sessionId,
+                    estimateName,
+                    displayName
+                );
+            }
 
             res.json({
                 success: true,
@@ -386,13 +418,65 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
             });
 
         } catch (error) {
-            console.error('❌ Ошибка анализа сметы:', error);
+            console.error(`[analyze] ОШИБКА: ${error.message}`);
             res.status(500).json({ error: error.message });
         } finally {
             try { if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path); } catch(e) {}
         }
     });
 });
+
+async function enrichKs2Items(items) {
+    const sessionCodeCache = new Map();
+    let coefficientMatches = 0;
+    let coefficientMismatches = 0;
+    let warningCount = 0;
+    let notAllowedCount = 0;
+
+    const enriched = [];
+
+    for (const item of items) {
+        const extractedCode = item.code || null;
+        const found = extractedCode
+            ? await codesDb.findHierarchicalMatch(extractedCode, sessionCodeCache)
+            : null;
+
+        const analysis = evaluateCoefficientAnalysis({
+            actualCoefficient: item.coefficient,
+            expectedCoefficient: found?.coefficient_value,
+            isRestoration: found?.matchType === 'restoration',
+            found: !!found,
+            baseStatus: found?.status,
+            baseDescription: found?.description
+        });
+
+        if (analysis.coefficientMatch === true) coefficientMatches++;
+        if (analysis.coefficientMatch === false) coefficientMismatches++;
+        if (analysis.statusCategory === 'warning') warningCount++;
+        if (analysis.statusCategory === 'notallowed') notAllowedCount++;
+
+        enriched.push({
+            ...item,
+            details: Array.isArray(item.details) ? item.details : [],
+            extractedCode,
+            matchType: found?.matchType || 'none',
+            status: analysis.status,
+            statusCategory: analysis.statusCategory,
+            description: analysis.description,
+            coefficientMatch: analysis.coefficientMatch,
+            expectedCoefficient: analysis.expectedCoefficient,
+            hasDetails: Array.isArray(item.details) && item.details.length > 0
+        });
+    }
+
+    return {
+        items: enriched,
+        coefficientMatches,
+        coefficientMismatches,
+        warningCount,
+        notAllowedCount
+    };
+}
 
 // ==================== АНАЛИЗ КС-2 ====================
 router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (req, res) => {
@@ -406,12 +490,7 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
         const user = await usersDb.getUserById(userId);
         if (!user) return res.status(401).json({ error: 'Пользователь не найден' });
 
-        console.log(`\n${'='.repeat(80)}`);
-        console.log(`📁 АНАЛИЗ КС-2 (parseKS2)`);
-        console.log(`👤 Пользователь: ${user.fullname} (${user.institution})`);
-        console.log(`📁 Проект ID: ${projectId || 'без проекта'}`);
-        console.log(`📄 Файлов: ${ks2Files.length}`);
-        console.log(`${'='.repeat(80)}`);
+  
 
         const allResults = [];
         let totalItems = 0;
@@ -429,36 +508,51 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
                 const parseResult = parseKS2(fileBuffer, displayName);
 
                 if (!parseResult.success) {
-                    console.error(`   ❌ Ошибка парсинга: ${parseResult.error}`);
+                    
                     allResults.push({ fileName: displayName, error: parseResult.error, success: false });
                     continue;
                 }
 
-                console.log(`   ✅ Распознано позиций: ${parseResult.totalItems}`);
-                console.log(`   💰 Сумма: ${parseResult.totalAmountFormatted} ₽`);
+                
+                
 
                 const sessionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 8);
                 sessionIds.push(sessionId);
+
+                const enriched = await enrichKs2Items(parseResult.items);
+                const estimateName = `КС-2: ${displayName}`;
 
                 await logsDb.createSession(sessionId, {
                     user: { fullname: user.fullname, institution: user.institution },
                     ip: req.ip,
                     filename: displayName,
-                    estimateName: `КС-2: ${displayName}`,
+                    estimateName,
                     isRevised: false,
                     totalCodes: parseResult.totalItems,
                     foundCodes: parseResult.totalItems,
                     notFoundCodes: 0,
                     totalAmount: parseResult.totalAmount,
+                    coefficientMatches: enriched.coefficientMatches,
+                    coefficientMismatches: enriched.coefficientMismatches,
                     status: 'completed',
                     project_id: projectId,
                     is_ks2: 1
                 });
 
-                const savedCount = await logsDb.saveKs2Items(sessionId, displayName, idx + 1, parseResult.items);
+                const savedCount = await logsDb.saveKs2Items(sessionId, displayName, idx + 1, enriched.items);
                 totalSavedCount += savedCount;
                 totalItems += parseResult.totalItems;
                 totalAmount += parseResult.totalAmount;
+
+                if (projectId) {
+                    await logsDb.updateProjectSession(
+                        projectId,
+                        userId,
+                        sessionId,
+                        estimateName,
+                        displayName
+                    );
+                }
 
                 allResults.push({
                     fileName: displayName,
@@ -467,27 +561,26 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
                     totalItems: parseResult.totalItems,
                     totalAmount: parseResult.totalAmount,
                     totalAmountFormatted: parseResult.totalAmountFormatted,
-                    items: parseResult.items,
+                    items: enriched.items,
+                    stats: {
+                        coefficientMatches: enriched.coefficientMatches,
+                        coefficientMismatches: enriched.coefficientMismatches,
+                        warningCount: enriched.warningCount,
+                        notAllowedCount: enriched.notAllowedCount
+                    },
                     detectedColumns: parseResult.detectedColumns,
                     startRow: parseResult.startRow
                 });
 
             } catch (err) {
-                console.error(`   ❌ Ошибка обработки файла ${displayName}:`, err.message);
+               
                 allResults.push({ fileName: displayName, error: err.message, success: false });
             } finally {
                 try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch(e) {}
             }
         }
 
-        console.log(`\n${'='.repeat(80)}`);
-        console.log(`📊 ИТОГИ АНАЛИЗА КС-2:`);
-        console.log(`   Обработано файлов: ${ks2Files.length}`);
-        console.log(`   Успешно: ${allResults.filter(r => r.success).length}`);
-        console.log(`   С ошибками: ${allResults.filter(r => !r.success).length}`);
-        console.log(`   Сохранено позиций: ${totalSavedCount}`);
-        console.log(`   Общая сумма: ${totalAmount.toLocaleString('ru-RU')} ₽`);
-        console.log(`${'='.repeat(80)}\n`);
+      
 
         res.json({
             success: true,
@@ -501,7 +594,7 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
         });
 
     } catch (error) {
-        console.error('❌ Ошибка анализа КС-2:', error);
+        
         res.status(500).json({ error: error.message, success: false });
     } finally {
         for (const file of ks2Files) {
@@ -515,7 +608,7 @@ router.get('/ks2-sessions/:sessionId', async (req, res) => {
     try {
         const { sessionId } = req.params;
         
-        console.log(`🔍 GET /ks2-sessions/${sessionId}`);
+     
         
         if (!sessionId) {
             return res.status(400).json({ error: 'sessionId обязателен' });
@@ -524,31 +617,14 @@ router.get('/ks2-sessions/:sessionId', async (req, res) => {
         const session = await logsDb.getOne(`SELECT * FROM sessions WHERE session_id = @p0`, [sessionId]);
         
         if (!session) {
-            console.log(`❌ Сессия ${sessionId} не найдена`);
+       
             return res.status(404).json({ error: 'Сессия не найдена' });
         }
         
-        console.log(`✅ Сессия найдена: is_ks2=${session.is_ks2}, filename=${session.filename}`);
         
-        let items = [];
-        try {
-            if (typeof logsDb.getKs2Items === 'function') {
-                items = await logsDb.getKs2Items(sessionId);
-                console.log(`✅ Найдено ${items.length} позиций КС-2`);
-            } else {
-                items = await logsDb.query(`
-                    SELECT * FROM ks2_items 
-                    WHERE session_id = @p0 
-                    ORDER BY position
-                `, [sessionId]);
-                console.log(`✅ Прямым запросом найдено ${items.length} позиций`);
-            }
-        } catch (itemsErr) {
-            console.error(`❌ Ошибка получения позиций:`, itemsErr.message);
-            items = [];
-        }
         
-        const totalAmount = session.total_amount || 0;
+        const items = await logsDb.getKs2Items(sessionId);
+        const totalAmount = session.total_amount || items.reduce((sum, i) => sum + (i.total || 0), 0);
         
         res.json({
             success: true,
@@ -559,16 +635,18 @@ router.get('/ks2-sessions/:sessionId', async (req, res) => {
                 created_at: session.created_at,
                 total_codes: session.total_codes || items.length,
                 total_amount: totalAmount,
+                coefficient_matches: session.coefficient_matches || 0,
+                coefficient_mismatches: session.coefficient_mismatches || 0,
                 status: session.status || 'completed',
                 is_ks2: session.is_ks2 || 1
             },
-            items: items,
+            items,
             totalItems: items.length,
-            totalAmount: totalAmount
+            totalAmount
         });
         
     } catch (error) {
-        console.error('❌ Ошибка получения КС-2 сессии:', error);
+
         res.status(500).json({ error: error.message });
     }
 });
@@ -612,7 +690,7 @@ router.post('/export-ks2-excel', requireAuth, async (req, res) => {
         res.setHeader('Content-Disposition', `attachment; filename="${fileName || 'ks2_export'}.xlsx"`);
         res.send(buffer);
     } catch (error) {
-        console.error('Ошибка экспорта КС-2 в Excel:', error);
+    
         res.status(500).json({ error: error.message });
     }
 });

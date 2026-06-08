@@ -14,7 +14,7 @@ async function requireAuth(req, res, next) {
     if (!token && process.env.NODE_ENV === 'development') {
         const userId = req.headers['x-user-id'];
         if (userId && !isNaN(parseInt(userId))) {
-            console.warn('⚠️ Using deprecated X-User-Id header in development mode');
+           
             req.userId = parseInt(userId);
             return next();
         }

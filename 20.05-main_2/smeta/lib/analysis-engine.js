@@ -25,7 +25,9 @@ const {
     extractCodeFromString, 
     extractTotalAmount, 
     parseNumberWithComma, 
-    formatNumber
+    formatNumber,
+    buildCoefficientIndex,      // <-- ДОБАВИТЬ
+    findCoefficientFromIndex 
 } = require('../../shareds/estimate-parser');
 
 // Фикс кодировки имени файла
@@ -63,24 +65,19 @@ async function performAnalysis(filePath, originalName, userId, isRevised, projec
     const fixedName = fixFilename(originalName);
     
     const moscowTime = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`[${moscowTime}] 📁 АНАЛИЗ ФАЙЛА: ${fixedName}`);
-    console.log(`👤 Пользователь: ${user.fullname} (${user.institution})`);
-    console.log(`🔄 Исправленная смета: ${isRevised ? 'Да' : 'Нет'}`);
-    console.log(`🔧 Режим проверки: УНИВЕРСАЛЬНЫЙ`);
-    console.log(`${'='.repeat(80)}`);
+
     
     const workbook = xlsx.readFile(filePath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     
-    console.log(`📊 Всего строк в файле: ${data.length}`);
+   
     
     // ==================== УНИВЕРСАЛЬНОЕ ОПРЕДЕЛЕНИЕ КОЛОНОК ====================
-    console.log('🔍 Универсальный режим: автоопределение колонок...');
+
     
     const headerRows = findHeaderRows(data);
-    console.log(`   Найдено строк-заголовков: ${headerRows.length}`);
+
     
     let positionCol, codeCol, coeffCol, amountCol, startRow, searchCoefficientLines;
     
@@ -103,12 +100,7 @@ async function performAnalysis(filePath, originalName, userId, isRevised, projec
     
     searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
     
-    console.log(`\n📌 ОПРЕДЕЛЁННЫЕ КОЛОНКИ:`);
-    console.log(`   Позиция: ${positionCol + 1} (${String.fromCharCode(65 + positionCol)})`);
-    console.log(`   Код: ${codeCol + 1} (${String.fromCharCode(65 + codeCol)})`);
-    console.log(`   Коэффициент: ${coeffCol + 1} (${String.fromCharCode(65 + coeffCol)})`);
-    console.log(`   Сумма: ${amountCol + 1} (${String.fromCharCode(65 + amountCol)})`);
-    console.log(`   Начало данных: строка ${startRow + 1}`);
+
     
     // Название сметы
     let estimateName = '';
@@ -125,33 +117,25 @@ async function performAnalysis(filePath, originalName, userId, isRevised, projec
     if (!estimateName && data.length > 14 && data[14] && data[14][0]) {
         estimateName = String(data[14][0]).trim();
     }
-    console.log(`\n📝 Название сметы: ${estimateName || 'не определено'}`);
+ 
     
     // Итоговая сумма
     const totalAmountInfo = extractTotalAmount(data, amountCol);
     const totalAmount = totalAmountInfo.totalAmount || 0;
     const foundRow = totalAmountInfo.foundRow;
     if (totalAmount) {
-        console.log(`💰 Итоговая сумма: ${totalAmount.toLocaleString('ru-RU')} ₽`);
+       
     }
     
     // Индекс коэффициентов
-    const coefficientIndex = new Map();
-    for (let i = 0; i < data.length; i++) {
-        const row = data[i];
-        if (!row) continue;
-        const coeffVal = parseNumberWithComma(row[coeffCol]);
-        if (coeffVal !== null && coeffVal !== 0 && coeffVal !== 1) {
-            coefficientIndex.set(i, coeffVal);
-        }
-    }
-    console.log(`\n📊 Найдено коэффициентов: ${coefficientIndex.size}`);
+    const coefficientIndex = buildCoefficientIndex(data, coeffCol);
+  
     
     // Сбор позиций
     const positionRows = [];
     const END_PHRASES = ['составил', 'проверил', 'начальник', 'главный инженер', 'руководитель'];
     
-    console.log(`\n🔍 Сбор позиций с ${startRow + 1} строки...`);
+   
     
     for (let i = startRow; i < data.length; i++) {
         const row = data[i];
@@ -165,7 +149,7 @@ async function performAnalysis(filePath, originalName, userId, isRevised, projec
         );
         
         if (isDocumentEnd) {
-            console.log(`   🏁 Конец документа на строке ${i + 1}`);
+        
             break;
         }
         
@@ -175,12 +159,12 @@ async function performAnalysis(filePath, originalName, userId, isRevised, projec
         if (positionValue && isPositionNumber(positionValue)) {
             positionRows.push(i);
             if (positionRows.length <= 20) {
-                console.log(`   ✅ Позиция ${normalizePositionNumber(positionValue)} на строке ${i + 1}`);
+              
             }
         }
     }
     
-    console.log(`\n🔢 Найдено позиций: ${positionRows.length}`);
+
     
     // Результаты анализа
     const results = [];
@@ -205,8 +189,7 @@ async function performAnalysis(filePath, originalName, userId, isRevised, projec
     const COEFF_TOLERANCE = 0.01;
     let textLines = 0;
     
-    console.log(`\n🔍 Начало анализа позиций...`);
-    console.log(`${'='.repeat(80)}`);
+ 
     
     for (let idx = 0; idx < positionRows.length; idx++) {
         const currentRow = positionRows[idx];
@@ -274,9 +257,15 @@ async function performAnalysis(filePath, originalName, userId, isRevised, projec
             coeffSearchLimit = Math.min(searchCoefficientLines, distanceToNext);
         }
         
-        if (coefficientIndex.has(currentRow)) {
-            actualCoefficient = coefficientIndex.get(currentRow);
-        } else {
+        const coeffResult = findCoefficientFromIndex(coefficientIndex, currentRow, coeffSearchLimit);
+        if (coeffResult.found) {
+            // ИСПРАВЛЕНИЕ: округляем коэффициент
+            actualCoefficient = coeffResult.value;
+            if (actualCoefficient !== null && actualCoefficient !== 1) {
+                actualCoefficient = Math.round(actualCoefficient * 100) / 100;
+            }
+        }
+         else {
             for (let offset = 1; offset <= coeffSearchLimit; offset++) {
                 const checkRow = currentRow + offset;
                 if (coefficientIndex.has(checkRow)) {
@@ -430,17 +419,7 @@ async function performAnalysis(filePath, originalName, userId, isRevised, projec
     const notFoundCount = results.filter(r => !r.found && !r.isText && !r.isRestoration).length;
     const problemResults = results.filter(r => r.category === 'warning' || r.category === 'notallowed');
     
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`📈 РЕЗУЛЬТАТЫ АНАЛИЗА:`);
-    console.log(`   Всего позиций: ${results.length}`);
-    console.log(`   Найдено в БД: ${foundCount}`);
-    console.log(`   Не найдено в БД: ${notFoundCount}`);
-    console.log(`   ⚠️ Требуют внимания: ${results.filter(r => r.category === 'warning').length}`);
-    console.log(`   ❌ Нельзя применять: ${results.filter(r => r.category === 'notallowed').length}`);
-    console.log(`   📝 Текстовые строки: ${textLines}`);
-    console.log(`   Коэффициентов верно: ${coefficientMatches}`);
-    console.log(`   Коэффициентов НЕверно: ${coefficientMismatches}`);
-    console.log(`${'='.repeat(80)}\n`);
+ 
     
     // Сохранение в БД
     await logsDb.createSession(sessionId, {

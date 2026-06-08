@@ -3,8 +3,8 @@
 
 import { AppState, updateState } from './state.js';
 import { showLoading, hideLoading, showError, showSuccess } from './ui-notifications.js';
-import { safeArray, safeNumber, safeObject, computeCategory } from '../utils/helpers.js';
-import { filterAndDisplayResults } from './results-renderer.js';
+import { safeArray, safeNumber, safeObject } from '../utils/helpers.js';
+import { filterAndDisplayResults, showEstimateResultsView } from './results-renderer.js';
 import { loadProjectHistory } from './projects.js';
 
 // Вспомогательная функция для определения МР
@@ -16,6 +16,14 @@ function isMR(text) {
     if (/\bмр\b/.test(lowerText)) return true;
     if (lowerText.includes('материал')) return true;
     return false;
+}
+
+function isProblemPosition(pos) {
+    if (!pos) return false;
+    if (pos.isTextPosition === true || pos.isText === true || pos.is_text === 1) return true;
+    if (pos.statusCategory === 'text') return true;
+    return pos.statusCategory === 'warning' ||
+           pos.statusCategory === 'notallowed';
 }
 
 /**
@@ -137,6 +145,18 @@ export async function uploadNewVersionToProject() {
         }
 
         const positions = safeArray(data.positions);
+        // Нормализуем коэффициенты (округляем до 2 знаков для отображения)
+        positions.forEach(pos => {
+            if (pos.actualCoefficient !== null && pos.actualCoefficient !== undefined) {
+                pos.actualCoefficient = Math.round(pos.actualCoefficient * 100) / 100;
+            }
+            if (pos.expectedCoefficient !== null && pos.expectedCoefficient !== undefined) {
+                pos.expectedCoefficient = Math.round(pos.expectedCoefficient * 100) / 100;
+            }
+            if (pos.coefficient !== null && pos.coefficient !== undefined) {
+                pos.coefficient = Math.round(pos.coefficient * 100) / 100;
+            }
+        });
         const stats = safeObject(data.stats);
         const totalMrAmount = safeNumber(data.totalMrAmount || data.totalAmount, 0);
         const sessionId = data.sessionId || null;
@@ -150,15 +170,7 @@ export async function uploadNewVersionToProject() {
         // - notallowed (реставрационные, запрещённые)
         // - text (цена поставщика)
         // НЕ добавляем позиции только на основании наличия МР
-        const problemPositions = positions.filter(pos => {
-            if (!pos) return false;
-            // Текстовая позиция – всегда в выдаче
-            if (pos.isTextPosition === true) return true;
-            // Проблемные категории
-            return pos.statusCategory === 'warning' ||
-                   pos.statusCategory === 'notallowed' ||
-                   pos.statusCategory === 'text';
-        });
+        const problemPositions = positions.filter(isProblemPosition);
 
         updateState('currentResults', problemPositions);
 
@@ -178,7 +190,7 @@ export async function uploadNewVersionToProject() {
                 emptyEl.classList.add('hidden');
                 emptyEl.style.display = 'none';
             }
-            // Применяем текущий фильтр (по умолчанию 'all', который показывает все problemPositions)
+            showEstimateResultsView();
             filterAndDisplayResults();
         } else {
             if (resultsEl) {
@@ -228,7 +240,7 @@ export async function uploadNewVersionToProject() {
         showSuccess(successMessage);
 
     } catch (error) {
-        console.error('❌ Ошибка анализа:', error);
+      
         showError(error.message || 'Ошибка при выполнении анализа');
     } finally {
         hideLoading();
@@ -243,92 +255,40 @@ export async function uploadNewVersionToProject() {
 
 export function displayResultsFromSession(session) {
     if (!session || !session.codes || !session.codes.length) {
-        console.warn('displayResultsFromSession: нет данных для отображения');
         showEmptyState();
         return;
     }
 
-    console.log('📊 displayResultsFromSession вызвана:', {
-        sessionId: session.session_id,
-        codesCount: session.codes.length,
-        sampleCode: session.codes[0]
-    });
-
-    // Сохраняем в глобальное состояние
-    updateState('currentResults', session.codes);
+    const allPositions = safeArray(session.codes);
     updateState('lastSessionId', session.session_id);
     updateState('currentResultsType', null);
-    updateState('detailedPositionsData', session.codes);
+    updateState('detailedPositionsData', allPositions);
 
-    // Подсчитываем проблемные позиции
-    const warningCount = session.codes.filter(c => 
-        c.statusCategory === 'warning' || 
-        c.coefficientMatch === false ||
-        (c.status === 'Обратите внимание' && !c.description?.includes('Понижающий'))
-    ).length;
-    
-    const notAllowedCount = session.codes.filter(c => 
-        c.statusCategory === 'notallowed' || 
-        c.isRestoration === true || 
-        c.is_restoration === 1 ||
-        c.status === 'Нельзя применять'
-    ).length;
-    
-    const textCount = session.codes.filter(c => 
-        c.statusCategory === 'text' || 
-        c.isText === true || 
-        c.is_text === 1 ||
-        c.matchType === 'text'
-    ).length;
-    
-    const hasProblems = (warningCount + notAllowedCount + textCount) > 0;
+    const totalMrAmount = safeNumber(
+        session.total_mr_amount ?? allPositions.reduce((sum, p) => sum + safeNumber(p.mrTotalAmount, 0), 0),
+        0
+    );
+    const totalMrRows = session.total_mr_rows ?? allPositions.reduce((sum, p) => sum + safeNumber(p.mrCount || p.mrDetails?.length, 0), 0);
+    const positionsWithMr = session.positions_with_mr ?? allPositions.filter(p => (p.mrDetails?.length || 0) > 0).length;
 
-    // Формируем HTML статистики
-    let statsHtml = `
-        <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:20px;padding:24px;margin-bottom:24px;">
-            <div style="color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
-                📊 ИТОГОВАЯ СУММА
-            </div>
-            <div style="color:white;font-size:36px;font-weight:800;">
-                ${(session.total_amount || 0).toLocaleString('ru-RU')} ₽
-            </div>
-            <div style="color:rgba(255,255,255,0.6);font-size:12px;margin-top:8px;">
-                📋 Всего позиций: ${session.total_codes || session.codes.length}
-            </div>
-        </div>
-        
-        <div class="stats-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">
-            <div class="stat-item" style="background:white;border-radius:16px;padding:20px;text-align:center;">
-                <div style="font-size:28px;font-weight:800;color:#10b981;">${session.codes.filter(c => c.statusCategory === 'ok' && c.found !== false).length}</div>
-                <div style="font-size:12px;color:#6b7280;margin-top:4px;">✅ Доступны</div>
-            </div>
-            <div class="stat-item" style="background:white;border-radius:16px;padding:20px;text-align:center;">
-                <div style="font-size:28px;font-weight:800;color:#f59e0b;">${warningCount}</div>
-                <div style="font-size:12px;color:#6b7280;margin-top:4px;">⚠️ Требуют внимания</div>
-            </div>
-            <div class="stat-item" style="background:white;border-radius:16px;padding:20px;text-align:center;">
-                <div style="font-size:28px;font-weight:800;color:#ef4444;">${notAllowedCount}</div>
-                <div style="font-size:12px;color:#6b7280;margin-top:4px;">❌ Нельзя применять</div>
-            </div>
-            <div class="stat-item" style="background:white;border-radius:16px;padding:20px;text-align:center;">
-                <div style="font-size:28px;font-weight:800;color:#8b5cf6;">${textCount}</div>
-                <div style="font-size:12px;color:#6b7280;margin-top:4px;">📝 Цена поставщика</div>
-            </div>
-        </div>
-    `;
+    const stats = {
+        warningCount: allPositions.filter(p => p.statusCategory === 'warning').length,
+        notAllowedCount: allPositions.filter(p => p.statusCategory === 'notallowed').length,
+        textCount: allPositions.filter(p => p.statusCategory === 'text' || p.isTextPosition).length,
+        totalMrRows,
+        positionsWithMr
+    };
 
-    // Обновляем DOM
-    const statsEl = document.getElementById('stats');
+    const problemPositions = allPositions.filter(isProblemPosition);
+    updateState('currentResults', problemPositions);
+    displayMrStats(allPositions, stats, totalMrAmount);
+
+    const hasProblems = problemPositions.length > 0;
     const resultsEl = document.getElementById('results');
     const emptyStateEl = document.getElementById('emptyState');
 
-    if (statsEl) {
-        statsEl.innerHTML = statsHtml;
-        statsEl.classList.remove('hidden');
-        statsEl.style.display = 'block';
-    }
-
     if (hasProblems) {
+        showEstimateResultsView();
         if (resultsEl) {
             resultsEl.classList.remove('hidden');
             resultsEl.style.display = 'block';
@@ -337,39 +297,11 @@ export function displayResultsFromSession(session) {
             emptyStateEl.classList.add('hidden');
             emptyStateEl.style.display = 'none';
         }
-        
-        // ВАЖНО: Показываем ТОЛЬКО проблемные позиции, а не все
-        const problemPositions = session.codes.filter(c => {
-            if (!c) return false;
-            // Текстовая позиция
-            if (c.isText === true || c.is_text === 1 || c.matchType === 'text') return true;
-            // Запрещённая
-            if (c.status === 'Нельзя применять' || c.isRestoration === true || c.is_restoration === 1) return true;
-            // Требует внимания
-            if (c.status === 'Обратите внимание') return true;
-            // Коэффициент не совпадает
-            if (c.coefficientMatch === false) return true;
-            // Не найден
-            if (c.found === false && c.status !== 'Доступен') return true;
-            return false;
-        });
-        
-        console.log(`📊 Проблемных позиций: ${problemPositions.length} из ${session.codes.length}`);
-        
-        // Обновляем состояние и отображаем
-        updateState('currentResults', problemPositions);
-        updateState('currentFilter', 'warning');
-        
-        // Рендерим таблицу
-        if (window.filterAndDisplayResults) {
-            window.filterAndDisplayResults();
-        }
-        
-        // Активируем чип "warning"
+        updateState('currentFilter', 'all');
+        filterAndDisplayResults();
         document.querySelectorAll('.chip').forEach(chip => chip.classList.remove('active'));
-        const warningChip = document.querySelector('.chip[data-status="warning"]');
-        if (warningChip) warningChip.classList.add('active');
-        
+        const allChip = document.querySelector('.chip[data-status="all"]');
+        if (allChip) allChip.classList.add('active');
     } else {
         if (resultsEl) {
             resultsEl.classList.add('hidden');
@@ -380,74 +312,22 @@ export function displayResultsFromSession(session) {
             emptyStateEl.style.display = 'block';
             emptyStateEl.innerHTML = `
                 <div class="empty-icon">
-                    <i class="fas fa-check-circle" style="color: #10b981; font-size: 48px;"></i>
+                    <i class="fas fa-check-circle" style="color:#10b981;font-size:48px;"></i>
                 </div>
-                <h3 style="font-size: 18px; font-weight: 600; color: #059669; margin-bottom: 8px;">✅ Ошибок не найдено</h3>
-                <p style="color: #6b7280;">Все коды доступны для применения</p>
+                <h3 style="font-size:18px;font-weight:600;color:#4b5563;margin-bottom:8px;">
+                    ✅ Ошибок не найдено
+                </h3>
+                <p style="color:#9ca3af;">Все коды в порядке</p>
             `;
         }
     }
 
-    // Показываем кнопки
     const fullReportBtn = document.getElementById('fullReportBtn');
+    const excelReportBtn = document.getElementById('excelReportBtn');
     const resetBtn = document.getElementById('resetBtn');
     if (fullReportBtn) fullReportBtn.classList.remove('hidden');
+    if (excelReportBtn) excelReportBtn.classList.remove('hidden');
     if (resetBtn) resetBtn.classList.remove('hidden');
-}
-
-function displaySessionStats(session, problemCodes) {
-    const warningCount = problemCodes.filter(c => c.category === 'warning').length;
-    const notAllowedCount = problemCodes.filter(c => c.category === 'notallowed').length;
-    const textCount = problemCodes.filter(c => c.category === 'text').length;
-    const totalAmount = safeNumber(session.total_amount, 0);
-    
-    let mrRows = 0;
-    let positionsWithMr = 0;
-    
-    for (const code of session.codes || []) {
-        if (code.mrCount > 0) {
-            mrRows += code.mrCount;
-            positionsWithMr++;
-        }
-    }
-    
-    const statsHtml = `
-        <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:20px;padding:24px;margin-bottom:24px;">
-            <div style="color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
-                📊 ИТОГОВАЯ СУММА
-            </div>
-            <div style="color:white;font-size:36px;font-weight:800;">
-                ${totalAmount.toLocaleString('ru-RU')} ₽
-            </div>
-            ${mrRows > 0 ? `
-            <div style="color:rgba(255,255,255,0.6);font-size:12px;margin-top:8px;">
-                📦 МР строк: ${mrRows} | 📋 Позиций с МР: ${positionsWithMr}
-            </div>
-            ` : ''}
-        </div>
-        
-        <div class="stats-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
-            <div class="stat-item" style="background:white;border-radius:16px;padding:20px;text-align:center;">
-                <div style="font-size:28px;font-weight:800;color:#f59e0b;">${warningCount}</div>
-                <div style="font-size:12px;color:#6b7280;margin-top:4px;">⚠️ Требуют внимания</div>
-            </div>
-            <div class="stat-item" style="background:white;border-radius:16px;padding:20px;text-align:center;">
-                <div style="font-size:28px;font-weight:800;color:#ef4444;">${notAllowedCount}</div>
-                <div style="font-size:12px;color:#6b7280;margin-top:4px;">❌ Нельзя применять</div>
-            </div>
-            <div class="stat-item" style="background:white;border-radius:16px;padding:20px;text-align:center;">
-                <div style="font-size:28px;font-weight:800;color:#8b5cf6;">${textCount}</div>
-                <div style="font-size:12px;color:#6b7280;margin-top:4px;">📝 Цена поставщика</div>
-            </div>
-        </div>
-    `;
-    
-    const statsEl = document.getElementById('stats');
-    if (statsEl) {
-        statsEl.innerHTML = statsHtml;
-        statsEl.classList.remove('hidden');
-        statsEl.style.display = 'block';
-    }
 }
 
 /**
@@ -455,14 +335,14 @@ function displaySessionStats(session, problemCodes) {
  */
 export function displayUnifiedResults(data) {
     if (!data) {
-        console.warn('displayUnifiedResults: data is undefined');
+        
         showError('Нет данных для отображения');
         showEmptyState();
         return;
     }
     
     if (!data.success) {
-        console.warn('displayUnifiedResults: data.success is false', data);
+      
         showError(data.error || 'Ошибка получения данных');
         showEmptyState();
         return;
@@ -520,7 +400,8 @@ export function displayUnifiedResults(data) {
     const fullReportBtn = document.getElementById('fullReportBtn');
     const excelReportBtn = document.getElementById('excelReportBtn');
     const resetBtn = document.getElementById('resetBtn');
-    
+    const copyLetterBtn = document.getElementById('copyLetterBtn');
+if (copyLetterBtn) copyLetterBtn.classList.add('hidden');
     if (fullReportBtn) fullReportBtn.classList.remove('hidden');
     if (excelReportBtn) excelReportBtn.classList.remove('hidden');
     if (resetBtn) resetBtn.classList.remove('hidden');

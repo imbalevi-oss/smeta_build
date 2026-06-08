@@ -118,6 +118,40 @@ async function initLogsDatabase() {
             archived_at DATETIME2
         )
     `);
+    // В файле shareds/logs-db.js
+// Найди функцию async function initLogsDatabase() {
+// И в самом конце, перед последней } добавь:
+
+    // Таблица для деталей позиций (ЗП, ЭМ, МР, НР, СП)
+    await createTableIfNotExists('position_details', `
+        CREATE TABLE position_details (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            session_id NVARCHAR(100) NOT NULL,
+            position_id INT NOT NULL,
+            detail_type NVARCHAR(50) NOT NULL,
+            detail_name NVARCHAR(500),
+            amount FLOAT DEFAULT 0,
+            quantity FLOAT,
+            unit NVARCHAR(50),
+            row_number INT,
+            created_at DATETIME2 DEFAULT DATEADD(hour, 3, GETUTCDATE())
+        )
+    `);
+
+    // Таблица для МР деталей
+    await createTableIfNotExists('mr_details', `
+        CREATE TABLE mr_details (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            session_id NVARCHAR(100) NOT NULL,
+            position_id INT NOT NULL,
+            material_name NVARCHAR(500),
+            amount FLOAT DEFAULT 0,
+            quantity FLOAT,
+            unit NVARCHAR(50),
+            row_number INT,
+            created_at DATETIME2 DEFAULT DATEADD(hour, 3, GETUTCDATE())
+        )
+    `);
     await createTableIfNotExists('ks2_items', `
     CREATE TABLE ks2_items (
         id INT IDENTITY(1,1) PRIMARY KEY,
@@ -158,6 +192,38 @@ async function initLogsDatabase() {
     await addColumnIfNotExists('code_details', 'quantity', 'FLOAT');
     await addColumnIfNotExists('code_details', 'unit', 'NVARCHAR(50)');
     await addColumnIfNotExists('code_details', 'price', 'FLOAT');
+    await addColumnIfNotExists('code_details', 'name', 'NVARCHAR(MAX)');
+    await addColumnIfNotExists('code_details', 'status_category', 'NVARCHAR(20)');
+    await addColumnIfNotExists('code_details', 'volume', 'FLOAT');
+    await addColumnIfNotExists('code_details', 'formatted_volume', 'NVARCHAR(200)');
+    await addColumnIfNotExists('sessions', 'total_mr_amount', 'FLOAT');
+    await addColumnIfNotExists('sessions', 'total_mr_rows', 'INT DEFAULT 0');
+    await addColumnIfNotExists('sessions', 'positions_with_mr', 'INT DEFAULT 0');
+    await addColumnIfNotExists('ks2_items', 'volume', 'NVARCHAR(200)');
+    await addColumnIfNotExists('ks2_items', 'details_json', 'NVARCHAR(MAX)');
+    await addColumnIfNotExists('ks2_items', 'extracted_code', 'NVARCHAR(255)');
+    await addColumnIfNotExists('ks2_items', 'expected_coefficient', 'FLOAT');
+    await addColumnIfNotExists('ks2_items', 'coefficient_match', 'INT DEFAULT 0');
+    await addColumnIfNotExists('ks2_items', 'status', 'NVARCHAR(50)');
+    await addColumnIfNotExists('ks2_items', 'status_category', 'NVARCHAR(20)');
+    await addColumnIfNotExists('ks2_items', 'description', 'NVARCHAR(MAX)');
+
+    await createTableIfNotExists('ks2_item_details', `
+        CREATE TABLE ks2_item_details (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            session_id NVARCHAR(100) NOT NULL,
+            item_id INT NOT NULL,
+            detail_type NVARCHAR(50) NOT NULL,
+            detail_name NVARCHAR(500),
+            amount FLOAT DEFAULT 0,
+            quantity FLOAT,
+            unit NVARCHAR(50),
+            row_number INT,
+            created_at DATETIME2 DEFAULT DATEADD(hour, 3, GETUTCDATE())
+        )
+    `);
+    try { await run(`CREATE INDEX idx_ks2_item_details_session ON ks2_item_details(session_id)`); } catch(e) {}
+    try { await run(`CREATE INDEX idx_ks2_item_details_item ON ks2_item_details(item_id)`); } catch(e) {}
 
     // ==================== ИНДЕКСЫ ====================
     try { await run(`CREATE INDEX idx_sessions_project_id ON sessions (project_id)`); } catch(e) {}
@@ -168,14 +234,14 @@ async function initLogsDatabase() {
     try { await run(`CREATE INDEX idx_code_details_session_id ON code_details (session_id)`); } catch(e) {}
 try { await run(`CREATE INDEX idx_ks2_items_session ON ks2_items(session_id)`); } catch(e) {}
 try { await run(`CREATE INDEX idx_ks2_items_file ON ks2_items(file_name)`); } catch(e) {}
-    console.log('✅ База данных логов инициализирована (MS SQL) с московским временем');
+
 }
 
 // ==================== СЕССИИ ====================
 // shareds/logs-db.js
 
 async function createSession(sessionId, data) {
-    console.log(`💾 createSession: ${sessionId}, is_ks2=${data.is_ks2 || 0}`);
+   
     
     const result = await run(`
         INSERT INTO sessions (
@@ -185,11 +251,13 @@ async function createSession(sessionId, data) {
             chapter_matches, relation_matches, parent_matches, sbornik_matches,
             text_lines, restoration_codes, has_coefficient_count,
             coefficient_matches, coefficient_mismatches,
-            total_amount, status, project_id, is_ks2
+            total_amount, status, project_id, is_ks2,
+            total_mr_amount, total_mr_rows, positions_with_mr
         ) VALUES (
             @p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9,
             @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17,
-            @p18, @p19, @p20, @p21, @p22, @p23, @p24, @p25, @p26
+            @p18, @p19, @p20, @p21, @p22, @p23, @p24, @p25, @p26,
+            @p27, @p28, @p29
         )
     `, [
         sessionId,
@@ -218,7 +286,10 @@ async function createSession(sessionId, data) {
         data.totalAmount || 0,
         data.status || 'completed',
         data.project_id || null,
-        data.is_ks2 || 0  // ← Убедитесь, что это поле здесь
+        data.is_ks2 || 0,
+        data.totalMrAmount || 0,
+        data.totalMrRows || 0,
+        data.positionsWithMr || 0
     ]);
     
     return sessionId;
@@ -253,78 +324,145 @@ async function updateSessionStatus(sessionId, status, totalAmount = null) {
         await run(`UPDATE sessions SET status = @p0, updated_at = DATEADD(hour, 3, GETUTCDATE()) WHERE session_id = @p1`, [status, sessionId]);
     }
 }
-// shareds/logs-db.js - ИСПРАВЛЕННАЯ ВЕРСИЯ
 
-// shareds/logs-db.js
+
+function encodeCoefficientMatch(value) {
+    if (value === true) return 1;
+    if (value === false) return -1;
+    return 0;
+}
+
+function decodeCoefficientMatch(value) {
+    if (value === 1) return true;
+    if (value === -1) return false;
+    return null;
+}
+
+function deriveStatusCategory(c) {
+    if (c.status_category) return c.status_category;
+    if (c.is_text === 1 || c.match_type === 'text') return 'text';
+    if (c.is_restoration === 1 || c.status === 'Нельзя применять') return 'notallowed';
+    if (c.coefficient_match === -1) return 'warning';
+    if (c.status === 'Обратите внимание') {
+        if (c.description && c.description.includes('Понижающий коэффициент')) return 'ok';
+        return 'warning';
+    }
+    if (c.status === 'НЕ НАЙДЕН') return 'warning';
+    return 'ok';
+}
+
+function mapPositionDetails(details) {
+    return (details || []).map(d => ({
+        type: d.detail_type,
+        name: d.detail_name,
+        amount: d.amount,
+        quantity: d.quantity,
+        unit: d.unit,
+        rowNumber: d.row_number
+    }));
+}
+
+function mapMrDetails(mrDetails) {
+    return (mrDetails || []).map(m => ({
+        type: 'МР',
+        name: m.material_name,
+        amount: m.amount,
+        quantity: m.quantity,
+        unit: m.unit,
+        rowNumber: m.row_number
+    }));
+}
+
+function transformCodeRow(c, details = [], mrDetails = []) {
+    const coeffMatch = decodeCoefficientMatch(c.coefficient_match);
+    const statusCategory = deriveStatusCategory(c);
+    const mappedDetails = mapPositionDetails(details);
+    const mappedMrDetails = mapMrDetails(mrDetails);
+    const mrTotalAmount = mappedMrDetails.reduce((sum, m) => sum + (m.amount || 0), 0);
+
+    return {
+        ...c,
+        name: c.name || null,
+        positionName: c.name || null,
+        positionNumber: c.position_number,
+        rowNumber: c.row_number,
+        extractedCode: c.extracted_code,
+        matchType: c.match_type,
+        matchedLevel: c.matched_level,
+        statusCategory,
+        isRestoration: c.is_restoration === 1,
+        isText: c.is_text === 1,
+        isTextPosition: c.is_text === 1 || statusCategory === 'text',
+        hasComment: c.has_comment === 1,
+        isDuplicate: c.is_duplicate === 1,
+        duplicateCount: c.duplicate_count,
+        hasCoefficient: c.has_coefficient === 1,
+        coefficientType: c.coefficient_type,
+        actualCoefficient: c.coefficient_value,
+        expectedCoefficient: c.expected_coefficient,
+        coefficientMatch: coeffMatch,
+        actual_coefficient: c.coefficient_value,
+        expected_coefficient: c.expected_coefficient,
+        coefficient_match: c.coefficient_match,
+        totalAmount: c.total_amount,
+        formattedVolume: c.formatted_volume,
+        volume: c.volume,
+        details: mappedDetails,
+        mrDetails: mappedMrDetails,
+        mrTotalAmount,
+        mrCount: mappedMrDetails.length,
+        hasDetails: mappedDetails.length > 0 || mappedMrDetails.length > 0,
+        found: c.status !== 'НЕ НАЙДЕН'
+    };
+}
 
 async function addCodeDetailsBatch(sessionId, codes) {
-    console.log(`🔍 addCodeDetailsBatch: sessionId=${sessionId}, codes.length=${codes?.length}`);
-    
-    if (!codes || codes.length === 0) {
-        console.log(`⚠️ Нет данных для сохранения`);
-        return 0;
-    }
+    if (!codes || codes.length === 0) return 0;
     
     let savedCount = 0;
-    let errorCount = 0;
     
     for (let i = 0; i < codes.length; i++) {
         const c = codes[i];
         
         try {
-            const sql = `
+            const result = await run(`
                 INSERT INTO code_details (
                     session_id, position, row_number, position_number, 
-                    code, extracted_code, status, match_type, 
+                    code, extracted_code, name, status, match_type, status_category,
                     is_restoration, is_text, description, total_amount,
                     quantity, unit, price, volume, formatted_volume,
+                    has_coefficient, coefficient_value, expected_coefficient, coefficient_match,
                     created_at
                 ) VALUES (
-                    @p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7,
-                    @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16,
+                    @p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9,
+                    @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18,
+                    @p19, @p20, @p21, @p22,
                     DATEADD(hour, 3, GETUTCDATE())
-                )
-            `;
+                );
+                SELECT SCOPE_IDENTITY() as id;
+            `, [
+                sessionId, i + 1, c.rowNumber || null, c.positionNumber || null,
+                c.code || '', c.extractedCode || '', c.name || c.positionName || null,
+                c.status || '', c.matchType || 'none', c.statusCategory || null,
+                c.isRestoration ? 1 : 0, c.isText ? 1 : 0, c.description || null, c.totalAmount || 0,
+                c.quantity || 0, c.unit || '', c.price || 0, c.volume || 0, c.formattedVolume || null,
+                c.hasCoefficient ? 1 : 0, c.actualCoefficient ?? null, c.expectedCoefficient ?? null,
+                encodeCoefficientMatch(c.coefficientMatch)
+            ]);
             
-            const params = [
-                sessionId,                           // p0
-                i + 1,                               // p1 - position
-                c.rowNumber || null,                 // p2
-                c.positionNumber || null,            // p3
-                c.code || '',                        // p4
-                c.extractedCode || '',               // p5
-                c.status || '',                      // p6
-                c.matchType || 'none',               // p7
-                c.isRestoration ? 1 : 0,             // p8
-                c.isText ? 1 : 0,                   // p9
-                c.description || null,              // p10
-                c.totalAmount || 0,                 // p11
-                c.quantity || 0,                    // p12
-                c.unit || '',                       // p13
-                c.price || 0,                       // p14
-                c.volume || 0,                      // p15
-                c.formattedVolume || null           // p16
-            ];
+            const positionId = result.recordset?.[0]?.id;
             
-            const result = await run(sql, params);
-            
-            if (result.changes > 0) {
+            if (positionId) {
                 savedCount++;
-                if (savedCount <= 5) {
-                    console.log(`✅ Сохранена позиция ${c.positionNumber}: total=${c.totalAmount}`);
-                }
-            } else {
-                errorCount++;
-                console.error(`❌ Не сохранена позиция ${c.positionNumber}: no rows affected`);
+                if (c.details?.length) await savePositionDetails(sessionId, positionId, c.details);
+                if (c.mrDetails?.length) await saveMrDetails(sessionId, positionId, c.mrDetails);
             }
-            
         } catch (err) {
-            errorCount++;
-            console.error(`❌ Ошибка сохранения позиции ${c.positionNumber}:`, err.message);
+           
         }
     }
     
-    console.log(`📊 ИТОГ СОХРАНЕНИЯ: saved=${savedCount}, errors=${errorCount}, total=${codes.length}`);
+
     return savedCount;
 }
 
@@ -413,8 +551,23 @@ async function restoreProject(projectId, userId) {
     await run(`UPDATE user_projects SET status = 'active', updated_at = DATEADD(hour, 3, GETUTCDATE()), archived_at = NULL WHERE id = @p0 AND user_id = @p1`, [projectId, userId]);
 }
 
-async function updateProjectSession(projectId, userId, sessionId) {
-    await run(`UPDATE user_projects SET current_session_id = @p0, updated_at = DATEADD(hour, 3, GETUTCDATE()) WHERE id = @p1 AND user_id = @p2`, [sessionId, projectId, userId]);
+async function updateProjectSession(projectId, userId, sessionId, estimateName = null, filename = null) {
+    if (estimateName != null || filename != null) {
+        await run(`
+            UPDATE user_projects
+            SET current_session_id = @p0,
+                estimate_name = COALESCE(@p1, estimate_name),
+                filename = COALESCE(@p2, filename),
+                updated_at = DATEADD(hour, 3, GETUTCDATE())
+            WHERE id = @p3 AND user_id = @p4
+        `, [sessionId, estimateName, filename, projectId, userId]);
+    } else {
+        await run(`
+            UPDATE user_projects
+            SET current_session_id = @p0, updated_at = DATEADD(hour, 3, GETUTCDATE())
+            WHERE id = @p1 AND user_id = @p2
+        `, [sessionId, projectId, userId]);
+    }
 }
 
 async function deleteProject(projectId, userId) {
@@ -494,7 +647,7 @@ async function getAllProjectsAdmin() {
 // shareds/logs-db.js
 
 async function getProjectSessions(projectId) {
-    console.log(`🔍 getProjectSessions для projectId=${projectId}`);
+    
     
     const sessions = await query(`
         SELECT 
@@ -507,6 +660,9 @@ async function getProjectSessions(projectId) {
             s.found_codes,
             s.not_found_codes,
             s.total_amount,
+            s.total_mr_amount,
+            s.total_mr_rows,
+            s.positions_with_mr,
             s.status,
             s.is_revised,
             s.is_ks2,
@@ -539,33 +695,26 @@ async function getProjectSessions(projectId) {
     `, [projectId]);
     
     // ПРЕОБРАЗУЕМ СУММУ - ЗАМЕНЯЕМ ЗАПЯТУЮ НА ТОЧКУ
-    const formattedSessions = sessions.map(session => {
-        let totalAmount = session.total_amount;
-        if (totalAmount !== null && totalAmount !== undefined) {
-            // Если это строка с запятой, заменяем на точку и парсим
-            if (typeof totalAmount === 'string' && totalAmount.includes(',')) {
-                totalAmount = parseFloat(totalAmount.replace(',', '.'));
-            }
-            // Если это число, оставляем как есть
-            else if (typeof totalAmount === 'number') {
-                totalAmount = totalAmount;
-            }
-            // Если это строка без запятой, просто парсим
-            else if (typeof totalAmount === 'string') {
-                totalAmount = parseFloat(totalAmount);
-            }
+    const parseAmount = (value) => {
+        if (value === null || value === undefined) return null;
+        if (typeof value === 'string' && value.includes(',')) {
+            value = parseFloat(value.replace(',', '.'));
+        } else if (typeof value === 'string') {
+            value = parseFloat(value);
         }
-        
-        return {
-            ...session,
-            total_amount: isNaN(totalAmount) ? null : totalAmount
-        };
-    });
+        return isNaN(value) ? null : value;
+    };
+
+    const formattedSessions = sessions.map(session => ({
+        ...session,
+        total_amount: parseAmount(session.total_amount),
+        total_mr_amount: parseAmount(session.total_mr_amount)
+    }));
     
-    console.log(`✅ getProjectSessions вернула ${formattedSessions.length} записей`);
+   
     
     if (formattedSessions.length > 0) {
-        console.log(`💰 Первая сессия: total_amount=${formattedSessions[0].total_amount} (${typeof formattedSessions[0].total_amount})`);
+       
     }
     
     return formattedSessions;
@@ -677,108 +826,151 @@ async function getTopEstimates(limit = 10) {
         ORDER BY count DESC
     `, [limit]);
 }
+function mapKs2DetailRows(dbDetails) {
+    return (dbDetails || []).map(d => ({
+        type: d.detail_type || d.type || 'Прочие',
+        name: d.detail_name || d.name || d.detail_type || '',
+        amount: d.amount || 0,
+        quantity: d.quantity ?? null,
+        unit: d.unit || '',
+        rowNumber: d.row_number ?? d.rowNumber ?? null
+    }));
+}
+
+function parseKs2DetailsFromJson(detailsJson) {
+    if (!detailsJson) return [];
+    try {
+        const parsed = JSON.parse(detailsJson);
+        return Array.isArray(parsed) ? mapKs2DetailRows(parsed) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function transformKs2Item(row, tableDetails = null) {
+    let details = mapKs2DetailRows(tableDetails);
+    if (!details.length) {
+        details = parseKs2DetailsFromJson(row.details_json);
+    }
+
+    const coeffMatch = decodeCoefficientMatch(row.coefficient_match);
+
+    return {
+        ...row,
+        ks2_position_number: row.ks2_position_number,
+        estimate_position_number: row.estimate_position_number,
+        extractedCode: row.extracted_code || row.code,
+        coefficient: row.coefficient,
+        expectedCoefficient: row.expected_coefficient,
+        coefficientMatch: coeffMatch,
+        statusCategory: row.status_category,
+        volume: row.volume,
+        details,
+        hasDetails: details.length > 0,
+        detailsTotal: details.reduce((sum, d) => sum + (d.amount || 0), 0)
+    };
+}
+
+async function saveKs2ItemDetails(sessionId, itemId, details) {
+    if (!details || details.length === 0) return 0;
+
+    let savedCount = 0;
+    for (const detail of details) {
+        try {
+            await run(`
+                INSERT INTO ks2_item_details (
+                    session_id, item_id, detail_type, detail_name,
+                    amount, quantity, unit, row_number, created_at
+                ) VALUES (
+                    @p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7,
+                    DATEADD(hour, 3, GETUTCDATE())
+                )
+            `, [
+                sessionId,
+                itemId,
+                detail.type || 'Прочие',
+                detail.name || detail.type || '',
+                detail.amount || 0,
+                detail.quantity ?? null,
+                detail.unit || '',
+                detail.rowNumber ?? detail.row_number ?? null
+            ]);
+            savedCount++;
+        } catch (err) {
+            // пропускаем проблемную деталь
+        }
+    }
+    return savedCount;
+}
+
 /**
  * Сохранение КС-2 позиций в БД
  */
 async function saveKs2Items(sessionId, fileName, fileIndex, items) {
     if (!items || items.length === 0) return 0;
-    
-    const BATCH_SIZE = 100; // Уменьшим размер для отладки
+
     let savedCount = 0;
-    
-    for (let batchStart = 0; batchStart < items.length; batchStart += BATCH_SIZE) {
-        const batch = items.slice(batchStart, batchStart + BATCH_SIZE);
-        
-        // Строим запрос с правильным количеством параметров
-        const placeholders = [];
-        const params = [];
-        let paramIndex = 0;
-        
-        for (let i = 0; i < batch.length; i++) {
-            const item = batch[i];
-            // Каждый элемент требует 18 параметров
-            const paramStart = paramIndex;
-            const placeholder = `(@p${paramStart}, @p${paramStart+1}, @p${paramStart+2}, @p${paramStart+3}, @p${paramStart+4}, @p${paramStart+5}, @p${paramStart+6}, @p${paramStart+7}, @p${paramStart+8}, @p${paramStart+9}, @p${paramStart+10}, @p${paramStart+11}, @p${paramStart+12}, @p${paramStart+13}, @p${paramStart+14}, @p${paramStart+15}, @p${paramStart+16}, @p${paramStart+17})`;
-            placeholders.push(placeholder);
-            
-            // Добавляем параметры для текущего элемента
-            params.push(
+
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+
+        const details = Array.isArray(item.details) ? item.details : [];
+        const detailsJson = details.length ? JSON.stringify(details) : null;
+
+        try {
+            const result = await run(`
+                INSERT INTO ks2_items (
+                    session_id, file_name, ks2_file_index,
+                    position, ks2_position_number, estimate_position_number,
+                    code, extracted_code, name, unit, quantity, price, total, volume,
+                    coefficient, expected_coefficient, coefficient_match,
+                    coeff_main, coeff_winter, coeff_recalc,
+                    status, status_category, description, details_json,
+                    row_number, created_at, updated_at
+                ) VALUES (
+                    @p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13,
+                    @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21, @p22, @p23, @p24,
+                    DATEADD(hour, 3, GETUTCDATE()), DATEADD(hour, 3, GETUTCDATE())
+                );
+                SELECT SCOPE_IDENTITY() as id;
+            `, [
                 sessionId,
                 fileName,
                 fileIndex,
-                item.position || 0,
+                item.position || i + 1,
                 item.ks2_position_number || null,
                 item.estimate_position_number || null,
                 item.code || null,
+                item.extractedCode || item.code || null,
                 item.name || null,
                 item.unit || null,
                 item.quantity || 0,
                 item.price || 0,
                 item.total || 0,
-                item.coefficient || null,
+                item.volume || null,
+                item.coefficient ?? null,
+                item.expectedCoefficient ?? null,
+                encodeCoefficientMatch(item.coefficientMatch),
                 item.coeff_main || null,
                 item.coeff_winter || null,
                 item.coeff_recalc || null,
+                item.status || null,
+                item.statusCategory || null,
+                item.description || null,
+                detailsJson,
                 item.row_number || null
-            );
-            paramIndex += 18;
-        }
-        
-        const sql = `
-            INSERT INTO ks2_items (
-                session_id, file_name, ks2_file_index,
-                position, ks2_position_number, estimate_position_number,
-                code, name, unit, quantity, price, total,
-                coefficient, coeff_main, coeff_winter, coeff_recalc,
-                row_number, created_at, updated_at
-            ) VALUES ${placeholders.join(',')}
-        `;
-        
-        console.log(`📝 Сохранение батча из ${batch.length} позиций, параметров: ${params.length}`);
-        
-        try {
-            const result = await run(sql, params);
-            savedCount += (result.changes || batch.length);
-            console.log(`   ✅ Сохранено ${result.changes || batch.length} записей`);
-        } catch (err) {
-            console.error(`   ❌ Ошибка сохранения батча:`, err.message);
-            // Пробуем сохранять по одной позиции при ошибке
-            for (let i = 0; i < batch.length; i++) {
-                try {
-                    const singleResult = await run(`
-                        INSERT INTO ks2_items (
-                            session_id, file_name, ks2_file_index,
-                            position, ks2_position_number, estimate_position_number,
-                            code, name, unit, quantity, price, total,
-                            coefficient, coeff_main, coeff_winter, coeff_recalc,
-                            row_number, created_at, updated_at
-                        ) VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16, DATEADD(hour, 3, GETUTCDATE()), DATEADD(hour, 3, GETUTCDATE()))
-                    `, [
-                        sessionId, fileName, fileIndex,
-                        batch[i].position || 0,
-                        batch[i].ks2_position_number || null,
-                        batch[i].estimate_position_number || null,
-                        batch[i].code || null,
-                        batch[i].name || null,
-                        batch[i].unit || null,
-                        batch[i].quantity || 0,
-                        batch[i].price || 0,
-                        batch[i].total || 0,
-                        batch[i].coefficient || null,
-                        batch[i].coeff_main || null,
-                        batch[i].coeff_winter || null,
-                        batch[i].coeff_recalc || null,
-                        batch[i].row_number || null
-                    ]);
-                    savedCount++;
-                } catch (singleErr) {
-                    console.error(`      ❌ Не удалось сохранить позицию ${batch[i].position}:`, singleErr.message);
-                }
+            ]);
+
+            const itemId = result.recordset?.[0]?.id;
+            if (itemId && details.length) {
+                await saveKs2ItemDetails(sessionId, itemId, details);
             }
+            savedCount++;
+        } catch (err) {
+            // пропускаем проблемную строку
         }
     }
-    
-    console.log(`✅ Итого сохранено ${savedCount} позиций КС-2 для сессии ${sessionId}`);
+
     return savedCount;
 }
 async function getMatchTypeDistribution(startDate, endDate) {
@@ -822,54 +1014,7 @@ async function getSessionsHistory(limit = 50, offset = 0) {
 }
 
 async function getSessionDetails(sessionId) {
-    const session = await getOne(`SELECT * FROM sessions WHERE session_id = @p0`, [sessionId]);
-    if (!session) return null;
-    
-    const codes = await query(`
-        SELECT 
-            id, session_id, position, row_number, position_number, code, extracted_code,
-            status, match_type, matched_level, is_restoration, is_text, has_comment,
-            is_duplicate, duplicate_count, has_coefficient, coefficient_type,
-            coefficient_value, expected_coefficient, coefficient_match, description,
-            created_at, is_main_row, total_amount, quantity, unit
-        FROM code_details 
-        WHERE session_id = @p0 
-        ORDER BY position
-    `, [sessionId], { timeout: LONG_TIMEOUT_MS });
-    
-    const transformedCodes = codes.map(c => {
-        let coeffMatch = null;
-        if (c.coefficient_match === 1) coeffMatch = true;
-        else if (c.coefficient_match === -1) coeffMatch = false;
-        
-        return {
-            ...c,
-            positionNumber: c.position_number,
-            rowNumber: c.row_number,
-            extractedCode: c.extracted_code,
-            matchType: c.match_type,
-            matchedLevel: c.matched_level,
-            isRestoration: c.is_restoration === 1,
-            isText: c.is_text === 1,
-            hasComment: c.has_comment === 1,
-            isDuplicate: c.is_duplicate === 1,
-            duplicateCount: c.duplicate_count,
-            hasCoefficient: c.has_coefficient === 1,
-            coefficientType: c.coefficient_type,
-            actualCoefficient: c.coefficient_value,
-            expectedCoefficient: c.expected_coefficient,
-            coefficientMatch: coeffMatch,
-            actual_coefficient: c.coefficient_value,
-            expected_coefficient: c.expected_coefficient,
-            coefficient_match: c.coefficient_match,
-            is_main_row: c.is_main_row,
-            total_amount: c.total_amount,
-            quantity: c.quantity,
-            unit: c.unit
-        };
-    });
-    
-    return { ...session, codes: transformedCodes };
+    return getSessionWithDetails(sessionId);
 }
 
 async function getHourlyStats(startDate, endDate) {
@@ -1236,84 +1381,44 @@ async function createKs2Session(sessionId, data) {
         data.projectId || null
     ]);
     
-    console.log(`✅ Создана КС-2 сессия: ${sessionId}`);
+    
     return sessionId;
-}
-
-/**
- * Сохранение КС-2 позиций в БД
- */
-/**
- * Сохранение КС-2 позиций в БД
- */
-async function saveKs2Items(sessionId, fileName, fileIndex, items) {
-    if (!items || items.length === 0) return 0;
-    
-    let savedCount = 0;
-    
-    // Сохраняем по одной позиции, чтобы избежать проблем с параметрами
-    for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        
-        try {
-            // Используем простой INSERT без плейсхолдеров с номерами
-            const result = await run(`
-                INSERT INTO ks2_items (
-                    session_id, file_name, ks2_file_index,
-                    position, ks2_position_number, estimate_position_number,
-                    code, name, unit, quantity, price, total,
-                    coefficient, coeff_main, coeff_winter, coeff_recalc,
-                    row_number, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATEADD(hour, 3, GETUTCDATE()), DATEADD(hour, 3, GETUTCDATE()))
-            `, [
-                sessionId,
-                fileName,
-                fileIndex,
-                item.position || 0,
-                item.ks2_position_number || null,
-                item.estimate_position_number || null,
-                item.code || null,
-                item.name || null,
-                item.unit || null,
-                item.quantity || 0,
-                item.price || 0,
-                item.total || 0,
-                item.coefficient || null,
-                item.coeff_main || null,
-                item.coeff_winter || null,
-                item.coeff_recalc || null,
-                item.row_number || null
-            ]);
-            
-            savedCount++;
-            
-            if ((i + 1) % 50 === 0) {
-                console.log(`   Сохранено ${savedCount}/${items.length} позиций...`);
-            }
-        } catch (err) {
-            console.error(`   ❌ Ошибка сохранения позиции ${item.position}:`, err.message);
-        }
-    }
-    
-    console.log(`✅ Сохранено ${savedCount} из ${items.length} позиций КС-2 для сессии ${sessionId}`);
-    return savedCount;
 }
 
 /**
  * Получение КС-2 позиций по сессии
  */
 async function getKs2Items(sessionId) {
-    return await query(`
+    const rows = await query(`
         SELECT 
             id, session_id, file_name, ks2_file_index,
             position, ks2_position_number, estimate_position_number,
-            code, name, unit, quantity, price, total,
-            coefficient, coeff_main, coeff_winter, coeff_recalc,
+            code, extracted_code, name, unit, quantity, price, total, volume,
+            coefficient, expected_coefficient, coefficient_match,
+            coeff_main, coeff_winter, coeff_recalc,
+            status, status_category, description, details_json,
             row_number, created_at
         FROM ks2_items 
         WHERE session_id = @p0
         ORDER BY ks2_file_index, position
-    `, [sessionId], { timeout: 60000 });
+    `, [sessionId], { timeout: LONG_TIMEOUT_MS });
+
+    const allDetails = await query(`
+        SELECT session_id, item_id, detail_type, detail_name, amount, quantity, unit, row_number
+        FROM ks2_item_details
+        WHERE session_id = @p0
+        ORDER BY item_id, row_number
+    `, [sessionId], { timeout: LONG_TIMEOUT_MS });
+
+    const detailsByItem = new Map();
+    for (const detail of allDetails) {
+        if (!detailsByItem.has(detail.item_id)) {
+            detailsByItem.set(detail.item_id, []);
+        }
+        detailsByItem.get(detail.item_id).push(detail);
+    }
+
+    return rows.map(row => transformKs2Item(row, detailsByItem.get(row.id) || null));
 }
 
 /**
@@ -1368,9 +1473,117 @@ async function getKs2SessionById(sessionId) {
  * Удаление КС-2 сессии
  */
 async function deleteKs2Session(sessionId) {
+    await run(`DELETE FROM ks2_item_details WHERE session_id = @p0`, [sessionId]);
     await run(`DELETE FROM ks2_items WHERE session_id = @p0`, [sessionId]);
     const result = await run(`DELETE FROM sessions WHERE session_id = @p0 AND is_ks2 = 1`, [sessionId]);
     return result.changes > 0;
+}
+// ==================== МЕТОДЫ ДЛЯ РАБОТЫ С ДЕТАЛЯМИ ====================
+
+async function savePositionDetails(sessionId, positionId, details) {
+    if (!details || details.length === 0) return 0;
+    let savedCount = 0;
+    for (const detail of details) {
+        try {
+            await run(`
+                INSERT INTO position_details (
+                    session_id, position_id, detail_type, detail_name, 
+                    amount, quantity, unit, row_number, created_at
+                ) VALUES (
+                    @p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, DATEADD(hour, 3, GETUTCDATE())
+                )
+            `, [
+                sessionId, positionId,
+                detail.type || 'Прочие',
+                detail.name || detail.type || '',
+                detail.amount || 0,
+                detail.quantity || null,
+                detail.unit || '',
+                detail.rowNumber || null
+            ]);
+            savedCount++;
+        } catch (err) {
+     
+        }
+    }
+    return savedCount;
+}
+
+async function saveMrDetails(sessionId, positionId, mrDetails) {
+    if (!mrDetails || mrDetails.length === 0) return 0;
+    let savedCount = 0;
+    for (const detail of mrDetails) {
+        try {
+            await run(`
+                INSERT INTO mr_details (
+                    session_id, position_id, material_name, 
+                    amount, quantity, unit, row_number, created_at
+                ) VALUES (
+                    @p0, @p1, @p2, @p3, @p4, @p5, @p6, DATEADD(hour, 3, GETUTCDATE())
+                )
+            `, [
+                sessionId, positionId,
+                detail.name || detail.type || '',
+                detail.amount || 0,
+                detail.quantity || null,
+                detail.unit || '',
+                detail.rowNumber || null
+            ]);
+            savedCount++;
+        } catch (err) {
+            
+        }
+    }
+    return savedCount;
+}
+
+async function getSessionWithDetails(sessionId) {
+    const session = await getOne(`SELECT * FROM sessions WHERE session_id = @p0`, [sessionId]);
+    if (!session) return null;
+    
+    const codes = await query(`
+        SELECT 
+            id, session_id, position, row_number, position_number, 
+            code, extracted_code, name, status, match_type, status_category,
+            matched_level, is_restoration, is_text, has_comment,
+            is_duplicate, duplicate_count, has_coefficient, coefficient_type,
+            coefficient_value, expected_coefficient, coefficient_match,
+            description, total_amount, quantity, unit, price,
+            volume, formatted_volume, is_main_row, created_at
+        FROM code_details 
+        WHERE session_id = @p0 
+        ORDER BY position
+    `, [sessionId], { timeout: LONG_TIMEOUT_MS });
+    
+    const allDetails = await query(`
+        SELECT * FROM position_details WHERE session_id = @p0 ORDER BY position_id, row_number
+    `, [sessionId]);
+    
+    const allMrDetails = await query(`
+        SELECT * FROM mr_details WHERE session_id = @p0 ORDER BY position_id, row_number
+    `, [sessionId]);
+    
+    const detailsByPosition = new Map();
+    for (const detail of allDetails) {
+        if (!detailsByPosition.has(detail.position_id)) {
+            detailsByPosition.set(detail.position_id, { details: [], mrDetails: [] });
+        }
+        detailsByPosition.get(detail.position_id).details.push(detail);
+    }
+    
+    for (const mr of allMrDetails) {
+        if (!detailsByPosition.has(mr.position_id)) {
+            detailsByPosition.set(mr.position_id, { details: [], mrDetails: [] });
+        }
+        detailsByPosition.get(mr.position_id).mrDetails.push(mr);
+    }
+    
+    const enrichedCodes = codes.map(code => {
+        const posDetails = detailsByPosition.get(code.id) || { details: [], mrDetails: [] };
+        return transformCodeRow(code, posDetails.details, posDetails.mrDetails);
+    });
+    
+    return { ...session, codes: enrichedCodes };
 }
 // ==================== ЭКСПОРТ ====================
 module.exports = {
@@ -1389,6 +1602,7 @@ module.exports = {
     getCoefficientStats,
     getSessionsHistory,
     getSessionDetails,
+    getSessionWithDetails,
     getHourlyStats,
     getFileTypeStats,
     getCodeStatusStats,
