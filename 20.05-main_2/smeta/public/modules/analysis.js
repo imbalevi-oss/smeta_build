@@ -328,6 +328,7 @@ export function displayResultsFromSession(session) {
     if (fullReportBtn) fullReportBtn.classList.remove('hidden');
     if (excelReportBtn) excelReportBtn.classList.remove('hidden');
     if (resetBtn) resetBtn.classList.remove('hidden');
+    if (copyLetterBtn) copyLetterBtn.classList.remove('hidden');
 }
 
 /**
@@ -405,6 +406,7 @@ if (copyLetterBtn) copyLetterBtn.classList.add('hidden');
     if (fullReportBtn) fullReportBtn.classList.remove('hidden');
     if (excelReportBtn) excelReportBtn.classList.remove('hidden');
     if (resetBtn) resetBtn.classList.remove('hidden');
+    if (copyLetterBtn) copyLetterBtn.classList.remove('hidden');
     
     updateState('currentFilter', 'all');
 }

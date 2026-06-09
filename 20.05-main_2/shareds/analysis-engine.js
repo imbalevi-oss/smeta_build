@@ -9,7 +9,13 @@ const codesDb = require('../../shareds/codes-db');
 const logsDb = require('../../shareds/logs-db');
 const usersDb = require('../../shareds/users-db');
 const { parseFullEstimate } = require('../../shareds/estimate-parser');
-
+console.log(`\n=== ДИАГНОСТИКА КОЭФФИЦИЕНТОВ ===`);
+for (let i = 0; i < Math.min(20, data.length); i++) {
+    const row = data[i];
+    if (row && row[6]) { // колонка G
+        console.log(`Строка ${i+1}, колонка G: "${row[6]}"`);
+    }
+}
 function fixFilename(filename) {
     if (!filename) return filename;
     try {
@@ -51,32 +57,31 @@ async function performAnalysis(filePath, originalName, userId, isRevised, projec
     const data = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
     
-    // ==================== УНИВЕРСАЛЬНОЕ ОПРЕДЕЛЕНИЕ КОЛОНОК ====================
+   // ==================== УНИВЕРСАЛЬНОЕ ОПРЕДЕЛЕНИЕ КОЛОНОК ====================
+const headerRows = findHeaderRows(data);
+let positionCol, codeCol, coeffCol, amountCol, startRow, searchCoefficientLines;
 
+// ПРИНУДИТЕЛЬНО: коэффициенты всегда из колонки G (индекс 6)
+coeffCol = 6;
+
+if (headerRows.length > 0) {
+    const detectedColumns = detectColumnsFromMultiRowHeader(data, headerRows);
+    const lastHeaderRow = Math.max(...headerRows);
     
-    const headerRows = findHeaderRows(data);
-   
-    
-    let positionCol, codeCol, coeffCol, amountCol, startRow, searchCoefficientLines;
-    
-    if (headerRows.length > 0) {
-        const detectedColumns = detectColumnsFromMultiRowHeader(data, headerRows);
-        const lastHeaderRow = Math.max(...headerRows);
-        
-        positionCol = detectedColumns.position !== -1 ? detectedColumns.position : detectPositionColumn(data, lastHeaderRow + 1);
-        codeCol = detectedColumns.code !== -1 ? detectedColumns.code : detectCodeColumn(data, lastHeaderRow + 1);
-        coeffCol = detectedColumns.coefficient !== -1 ? detectedColumns.coefficient : detectCoefficientColumn(data, lastHeaderRow + 1);
-        amountCol = detectAmountColumnUniversal(data, headerRows);
-        startRow = findDataStartRow(data, headerRows);
-    } else {
-        startRow = 27;
-        positionCol = detectPositionColumn(data, startRow);
-        codeCol = detectCodeColumn(data, startRow);
-        coeffCol = detectCoefficientColumn(data, startRow);
-        amountCol = detectAmountColumnUniversal(data, []);
-    }
-    
-    searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
+    positionCol = detectedColumns.position !== -1 ? detectedColumns.position : detectPositionColumn(data, lastHeaderRow + 1);
+    codeCol = detectedColumns.code !== -1 ? detectedColumns.code : detectCodeColumn(data, lastHeaderRow + 1);
+    // НЕ используем detectedColumns.coefficient и НЕ вызываем detectCoefficientColumn
+    amountCol = detectAmountColumnUniversal(data, headerRows);
+    startRow = findDataStartRow(data, headerRows);
+} else {
+    startRow = 27;
+    positionCol = detectPositionColumn(data, startRow);
+    codeCol = detectCodeColumn(data, startRow);
+    // НЕ вызываем detectCoefficientColumn
+    amountCol = detectAmountColumnUniversal(data, []);
+}
+
+searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
 
     
     // Название сметы

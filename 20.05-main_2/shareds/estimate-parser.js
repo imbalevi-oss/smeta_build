@@ -98,13 +98,9 @@ function parseNumberWithComma(value) {
     
     if (isNaN(num)) return null;
     
-    // КОНСОЛЬНЫЙ ВЫВОД оригинального значения
-    console.log(`[parseNumberWithComma] Оригинал: "${value}" -> Распаршено: ${num}`);
-    
     // Нормализация коэффициента - округление до 2 знаков
     if (num > 0.01 && num < 100 && num !== Math.floor(num)) {
         const normalized = Math.round(num * 100) / 100;
-        console.log(`[parseNumberWithComma] Нормализация: ${num} -> ${normalized}`);
         return normalized;
     }
     
@@ -148,28 +144,9 @@ function calculateVolume(quantity, unitStr) {
     let result;
     if (unitValue > 0 && qty > 0) {
         result = qty * unitValue;
-  
     } else {
         result = qty;
-        
     }
-    return result;
-}
-
-function formatVolume(volume, unitStr) {
-    if (volume === 0) return '';
-    const unit = extractUnit(unitStr);
-    const formattedVolume = volume.toLocaleString('ru-RU', { 
-        minimumFractionDigits: 0, 
-        maximumFractionDigits: 3 
-    });
-    let result;
-    if (unit && unit.length > 0) {
-        result = `${formattedVolume} ${unit}`;
-    } else {
-        result = formattedVolume;
-    }
-  
     return result;
 }
 
@@ -371,7 +348,7 @@ function parseFullEstimate(fileBuffer) {
         const unitCol = 3;           // D
         const quantityCol = 4;       // E
         const priceCol = 5;          // F
-        let coeffCol = columns.coefficient !== -1 ? columns.coefficient : 6; // G
+        let coeffCol = 6; // Всегда колонка G (7-я в Excel)
         const positionCol = columns.position !== -1 ? columns.position : 0;    // A
 
         console.log(`Определённые колонки:`);
@@ -399,44 +376,6 @@ function parseFullEstimate(fileBuffer) {
                     coeffFound = true;
                     console.log(`  ✅ Найден коэффициент в колонке ${coeffCol+1}, строка ${i+1}: "${cell}" -> ${val}`);
                 }
-            }
-        }
-        
-        // Если не нашли в предполагаемой колонке, ищем в соседних
-        if (!coeffFound) {
-            console.log(`  В колонке ${coeffCol+1} коэффициенты не найдены. Ищем в соседних колонках...`);
-            
-            const searchCols = [4, 5, 6, 7, 8, 9]; // Колонки E, F, G, H, I, J
-            let bestCol = -1;
-            let maxCount = 0;
-            
-            for (const col of searchCols) {
-                let count = 0;
-                for (let i = startRow; i < Math.min(startRow + 50, data.length); i++) {
-                    const row = data[i];
-                    if (!row) continue;
-                    const cell = row[col];
-                    if (cell && String(cell).trim() !== '') {
-                        const val = parseNumberWithComma(cell);
-                        if (val !== null && val !== 0 && val !== 1 && val > 0.01 && val < 100) {
-                            count++;
-                        }
-                    }
-                }
-                if (count > maxCount) {
-                    maxCount = count;
-                    bestCol = col;
-                }
-                if (count > 0) {
-                    console.log(`    Колонка ${col+1} (${String.fromCharCode(65+col)}): найдено ${count} коэффициентов`);
-                }
-            }
-            
-            if (bestCol !== -1 && maxCount > 0) {
-                coeffCol = bestCol;
-                console.log(`  ✅ Выбрана колонка для коэффициентов: ${coeffCol+1} (${String.fromCharCode(65+coeffCol)}) с ${maxCount} коэффициентами`);
-            } else {
-                console.log(`  ⚠️ Коэффициенты не найдены ни в одной колонке!`);
             }
         }
 
@@ -489,24 +428,6 @@ function parseFullEstimate(fileBuffer) {
                             coeffValue = parsed;
                             coeffSource = `строка ${i+offset+1}, колонка ${coeffCol+1}`;
                             break;
-                        }
-                    }
-                }
-            }
-            
-            // Если всё ещё не нашли, ищем в соседних колонках этой же строки
-            if (!coeffValue) {
-                const neighborCols = [coeffCol - 1, coeffCol - 2, coeffCol + 1, coeffCol + 2];
-                for (const col of neighborCols) {
-                    if (col >= 0 && col < row.length && row[col] !== undefined && row[col] !== null) {
-                        const cell = row[col];
-                        if (cell && String(cell).trim() !== '') {
-                            const parsed = parseNumberWithComma(cell);
-                            if (parsed !== null && parsed !== 0 && parsed !== 1 && parsed > 0.01 && parsed < 100) {
-                                coeffValue = parsed;
-                                coeffSource = `строка ${i+1}, колонка ${col+1}`;
-                                break;
-                            }
                         }
                     }
                 }
@@ -646,10 +567,6 @@ function parseFullEstimate(fileBuffer) {
 function parseEstimate(fileBuffer, originalName) {
     const result = parseFullEstimate(fileBuffer);
    
-    if (result.positions && result.positions.length > 0) {
-        const first = result.positions[0];
-
-    }
     if (!result.success) {
         return {
             success: false,
@@ -661,23 +578,25 @@ function parseEstimate(fileBuffer, originalName) {
             detectedColumns: { position: 0, code: 1, amount: 9, coefficient: 6 }
         };
     }
-const items = result.positions.map(pos => ({
-    positionNumber: pos.positionNumber,
-    code: pos.code,
-    name: pos.name,
-    totalAmount: pos.totalAmount,
-    quantity: pos.quantity,           // ← должно быть
-    unit: pos.unit,                   // ← должно быть
-    coefficient: pos.coefficient,
-    isTextPosition: pos.isTextPosition,
-    details: pos.details,
-    mrDetails: pos.mrDetails,
-    mrTotalAmount: pos.mrTotalAmount,
-    volume: pos.volume,               // ← ДОБАВИТЬ!
-    formattedVolume: pos.formattedVolume, // ← ДОБАВИТЬ!
-    price: pos.price,                 // ← ДОБАВИТЬ!
-    rowNumber: pos.rowNumber
-}));
+
+    const items = result.positions.map(pos => ({
+        positionNumber: pos.positionNumber,
+        code: pos.code,
+        name: pos.name,
+        totalAmount: pos.totalAmount,
+        quantity: pos.quantity,
+        unit: pos.unit,
+        coefficient: pos.coefficient,
+        isTextPosition: pos.isTextPosition,
+        details: pos.details,
+        mrDetails: pos.mrDetails,
+        mrTotalAmount: pos.mrTotalAmount,
+        volume: pos.volume,
+        formattedVolume: pos.formattedVolume,
+        price: pos.price,
+        rowNumber: pos.rowNumber
+    }));
+
     return {
         success: true,
         items: items,
@@ -687,6 +606,7 @@ const items = result.positions.map(pos => ({
         detectedColumns: { position: 0, code: 1, amount: 9, coefficient: 6 }
     };
 }
+
 /**
  * Построение индекса всех коэффициентов в документе
  * @param {Array} data - данные из Excel
@@ -745,6 +665,117 @@ function findCoefficientFromIndex(coefficientIndex, startRow, maxLinesDown) {
         offset: null
     };
 }
+
+// ==================== ДОПОЛНИТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ СОВМЕСТИМОСТИ ====================
+
+function detectPositionColumn(data, startRow) {
+    // Ищем первую строку, где в колонке A есть номер позиции
+    for (let i = startRow; i < Math.min(startRow + 50, data.length); i++) {
+        const row = data[i];
+        if (row && row[0] && isPositionNumber(row[0])) return 0;
+        if (row && row[1] && isPositionNumber(row[1])) return 1;
+    }
+    return 0; // по умолчанию колонка A
+}
+
+function detectCodeColumn(data, startRow) {
+    // Ищем колонку с шифром (обычно B или C)
+    for (let i = startRow; i < Math.min(startRow + 50, data.length); i++) {
+        const row = data[i];
+        if (!row) continue;
+        for (let col = 1; col <= 3; col++) {
+            const cell = row[col];
+            if (cell && typeof cell === 'string' && /^\d+\.\d+/.test(cell.trim())) {
+                return col;
+            }
+        }
+    }
+    return 1; // по умолчанию B
+}
+
+function detectCoefficientColumn(data, startRow) {
+    // Расширенный поиск колонки коэффициентов по заголовкам
+    const coeffKeywords = ['поправоч', 'коэфф', 'коэффициент', 'coeff', 'k', 'зимн', 'удорож', 'пересчет'];
+    
+    // Сначала ищем в первых 30 строках заголовки
+    for (let i = 0; i < Math.min(30, data.length); i++) {
+        const row = data[i];
+        if (!row) continue;
+        for (let col = 0; col < row.length; col++) {
+            const cell = String(row[col] || '').toLowerCase();
+            // Проверяем на точное совпадение с "Попра-вочные коэфф."
+            if (cell.includes('попра-вочные') || cell.includes('поправочные')) {
+                console.log(`[detectCoefficientColumn] Найдена колонка коэффициентов: ${col+1} (${String.fromCharCode(65+col)}) по заголовку "${row[col]}"`);
+                return col;
+            }
+            for (const kw of coeffKeywords) {
+                if (cell.includes(kw)) {
+                    console.log(`[detectCoefficientColumn] Найдена колонка коэффициентов: ${col+1} (${String.fromCharCode(65+col)}) по ключевому слову "${kw}"`);
+                    return col;
+                }
+            }
+        }
+    }
+    
+    // Если не нашли, ищем по наличию чисел отличных от 0,1 в диапазоне 0.01-100
+    for (let col = 6; col <= 9; col++) { // колонки G, H, I, J
+        let coeffCount = 0;
+        for (let i = startRow; i < Math.min(startRow + 50, data.length); i++) {
+            const row = data[i];
+            if (!row) continue;
+            const val = parseNumberWithComma(row[col]);
+            if (val !== null && val !== 0 && val !== 1 && val > 0.01 && val < 100) {
+                coeffCount++;
+            }
+        }
+        if (coeffCount >= 3) {
+            console.log(`[detectCoefficientColumn] Выбрана колонка ${col+1} (${String.fromCharCode(65+col)}) по содержимому (найдено ${coeffCount} коэффициентов)`);
+            return col;
+        }
+    }
+    
+    return 6; // по умолчанию G (индекс 6)
+}
+
+function extractTotalAmount(data, amountCol) {
+    let totalAmount = 0;
+    let foundRow = null;
+    // Ищем строки с "Итого", "Всего" в первой колонке и берём сумму из amountCol
+    const totalKeywords = ['итого', 'всего', 'всего по смете', 'всего с ндс'];
+    for (let i = data.length - 1; i >= 0; i--) {
+        const row = data[i];
+        if (!row) continue;
+        const firstCell = String(row[0] || '').toLowerCase();
+        if (totalKeywords.some(kw => firstCell.includes(kw))) {
+            const amount = parseNumberWithComma(row[amountCol]);
+            if (amount !== null && amount > 0) {
+                totalAmount = amount;
+                foundRow = i + 1;
+                break;
+            }
+        }
+    }
+    // Если не нашли, пробуем взять сумму из amountCol в последней строке
+    if (totalAmount === 0 && data.length > 0) {
+        const lastRow = data[data.length - 1];
+        if (lastRow && lastRow[amountCol]) {
+            totalAmount = parseNumberWithComma(lastRow[amountCol]);
+            foundRow = data.length;
+        }
+    }
+    return { totalAmount, foundRow };
+}
+
+function normalizePositionNumber(value) {
+    if (value === null || value === undefined) return '';
+    return String(value).trim();
+}
+
+function formatNumber(num) {
+    if (num === null || num === undefined) return '';
+    return num.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 // ==================== ЭКСПОРТ ====================
 module.exports = {
     parseFullEstimate,
@@ -758,11 +789,16 @@ module.exports = {
     isMR,
     buildCoefficientIndex,
     findCoefficientFromIndex,
-    parseNumberWithComma,
     findHeaderRows,
     detectColumnsFromMultiRowHeader,
     detectAmountColumnUniversal,
     findDataStartRow,
     isPositionNumber,
-    isPureText
+    isPureText, 
+    detectPositionColumn,
+    detectCodeColumn,
+    detectCoefficientColumn,
+    extractTotalAmount,
+    formatNumber,
+    normalizePositionNumber    
 };
