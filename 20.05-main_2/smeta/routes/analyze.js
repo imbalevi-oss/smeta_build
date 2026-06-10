@@ -63,59 +63,63 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } });
 
-// ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+// ==================== ПРОВЕРКА НЕКОРРЕКТНЫХ СТРОК ====================
 
 /**
- * Проверяет, является ли строка некорректной для анализа
- * (пропускаем пустые, одиночные цифры, слишком короткие строки и т.д.)
+ * Проверяет, является ли строка НЕКОРРЕКТНОЙ для анализа
+ * Возвращает объект с результатом и причиной
  */
-// routes/analyze.js
-
-/**
- * Проверяет, является ли строка МУСОРНОЙ (некорректной) для анализа
- * 
- * ПРОПУСКАЕМ (игнорируем):
- * - пустые строки
- * - одиночные цифры: "1", "2", "3"
- * - двузначные числа без спецсимволов: "11", "12", "23"
- * - длинный текст (>50 символов) - описания, примечания, технические условия
- * 
- * АНАЛИЗИРУЕМ:
- * - "цена поставщика" и подобные короткие текстовые строки
- * - "2,1", "12,1", "55,1" (номера позиций с запятыми)
- * - любые строки, похожие на шифры (с точками, дефисами)
- * - короткие текстовые строки (до 50 символов) с буквами
- */
-function isInvalidCodeString(str) {
-    if (!str || typeof str !== 'string') return true;
+function checkInvalidCodeString(str) {
+    if (!str || typeof str !== 'string') {
+        return { isInvalid: true, reason: 'Пустое значение' };
+    }
+    
     const trimmed = str.trim();
     
     // Пустые строки
-    if (trimmed === '') return true;
+    if (trimmed === '') {
+        return { isInvalid: true, reason: 'Пустая строка шифра' };
+    }
     
-    // ========== ПРОПУСКАЕМ ==========
-    // Длинный текст (>50 символов) - не может быть шифром и не цена поставщика
-    if (trimmed.length > 50) return true;
-    if (trimmed === '9999990001') return true;
-    // Одиночные цифры: "1", "2", "3", "4", "5", "6", "7", "8", "9"
-    if (/^\d$/.test(trimmed)) return true;
+    // Служебный код
+    if (trimmed === '9999990001') {
+        return { isInvalid: true, reason: 'Служебный код 9999990001 (пропускаем)' };
+    }
     
-    // Двузначные числа без спецсимволов: "11", "12", "23", "45"
-    if (/^\d{2}$/.test(trimmed)) return true;
+    // Длинный текст (>50 символов)
+    if (trimmed.length > 50) {
+        return { isInvalid: true, reason: `Слишком длинная строка (>50 символов): "${trimmed.substring(0, 50)}..." - техническое описание` };
+    }
     
-    // Трёхзначные числа без спецсимволов: "123", "456" (часто ошибочные данные)
-    if (/^\d{3}$/.test(trimmed)) return true;
+    // Одиночные цифры: "1", "2", "3"
+    if (/^\d$/.test(trimmed)) {
+        return { isInvalid: true, reason: `Одиночная цифра "${trimmed}" - не может быть шифром расценки` };
+    }
     
-    // Строки, состоящие только из цифр и запятых (например, "1,2,3") - не код
-    if (/^[\d,]+$/.test(trimmed) && trimmed.length < 10) {
-        // Если короткая строка из цифр и запятых - скорее всего, номера позиций
-        // Но такие как "2,1" - это может быть номер позиции, анализируем
-        // А "123456" - пропускаем
-        if (!trimmed.includes(',')) return true;
+    // Двузначные числа без спецсимволов
+    if (/^\d{2}$/.test(trimmed)) {
+        return { isInvalid: true, reason: `Двузначное число "${trimmed}" - не может быть шифром расценки` };
+    }
+    
+    // Трёхзначные числа без спецсимволов
+    if (/^\d{3}$/.test(trimmed)) {
+        return { isInvalid: true, reason: `Трёхзначное число "${trimmed}" - ошибочные данные, пропускаем` };
+    }
+    
+    // Строки, состоящие только из цифр и запятых (без точек/дефисов)
+    if (/^[\d,]+$/.test(trimmed) && trimmed.length < 10 && !trimmed.includes(',')) {
+        return { isInvalid: true, reason: `Число без разделителей "${trimmed}" - не похоже на шифр расценки` };
+    }
+    
+    // Примечания и сноски
+    const lowerTrimmed = trimmed.toLowerCase();
+    if (lowerTrimmed.includes('примечание') || lowerTrimmed.includes('сноска') || 
+        lowerTrimmed.includes('в том числе') || lowerTrimmed.includes('в т.ч.')) {
+        return { isInvalid: true, reason: `Служебная строка: "${trimmed}" - примечание/сноска` };
     }
     
     // ВСЁ ОСТАЛЬНОЕ анализируем
-    return false;
+    return { isInvalid: false, reason: null };
 }
 
 // ==================== АНАЛИЗ СМЕТЫ ====================
@@ -131,33 +135,51 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
         const userId = req.userId;
 
         try {
-            console.log(`\n========== АНАЛИЗ СМЕТЫ ==========`);
-            console.log(`Файл: ${displayName}`);
-
+     
             const parseResult = parseEstimate(fileBuffer, displayName);
             if (!parseResult.success) throw new Error(`Ошибка парсинга: ${parseResult.error}`);
 
             const parsedPositions = parseResult.items;
-            console.log(`Парсинг завершён. Найдено позиций: ${parsedPositions.length}`);
+           
 
             const sessionCodeCache = new Map();
             const analyzedPositions = [];
+            
+            // Статистика
             let textCount = 0, warningCount = 0, notAllowedCount = 0, notFoundCount = 0, foundCount = 0;
             let coefficientMatches = 0, coefficientMismatches = 0;
             let skippedCount = 0;
-            const skippedExamples = [];
+            
+            // Детальное логирование пропусков
+            const skippedReasons = [];
+            const skippedReasonGroups = {};
 
             for (const pos of parsedPositions) {
                 const positionNumber = pos.positionNumber;
                 const codeRaw = pos.code;
                 
-                // ========== ПРОПУСК НЕКОРРЕКТНЫХ СТРОК ==========
-                if (isInvalidCodeString(codeRaw)) {
+                // ========== ПРОВЕРКА НА НЕКОРРЕКТНОСТЬ ==========
+                const invalidCheck = checkInvalidCodeString(codeRaw);
+                
+                if (invalidCheck.isInvalid) {
                     skippedCount++;
-                    if (skippedExamples.length < 10) {
-                        skippedExamples.push({ positionNumber, code: codeRaw });
-                    }
-                    console.log(`[analyze] Пропущена некорректная строка шифра: "${codeRaw}" (позиция ${positionNumber})`);
+                    
+                    // Группировка по причинам
+                    skippedReasonGroups[invalidCheck.reason] = (skippedReasonGroups[invalidCheck.reason] || 0) + 1;
+                    
+                    // Сохраняем детали пропуска
+                    skippedReasons.push({
+                        positionNumber: positionNumber,
+                        code: codeRaw,
+                        reason: invalidCheck.reason,
+                        name: pos.name || '—',
+                        totalAmount: pos.totalAmount || 0,
+                        rowNumber: pos.rowNumber
+                    });
+                    
+                    // Логируем в консоль с деталями
+          
+                    
                     continue;
                 }
                 
@@ -260,13 +282,12 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 // Единая логика анализа коэффициента
                 const analysis = evaluateCoefficientAnalysis({
                     actualCoefficient: actualCoefficient,
-                    expectedCoefficient: found?.coefficient_value,  // ← ЭТО ВАЖНО! Передаём коэффициент из БД
+                    expectedCoefficient: found?.coefficient_value,
                     isRestoration: (found?.matchType === 'restoration'),
                     found: !!found,
                     baseStatus: found?.status || 'Доступен',
                     baseDescription: found?.description || ''
                 });
-                
 
                 if (analysis.coefficientMatch === true) coefficientMatches++;
                 if (analysis.coefficientMatch === false) coefficientMismatches++;
@@ -310,21 +331,23 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 });
             }
 
-            // ========== ВЫВОД СТАТИСТИКИ ==========
-            console.log(`\n========== СТАТИСТИКА АНАЛИЗА ==========`);
-            console.log(`Всего позиций в файле: ${parsedPositions.length}`);
-            console.log(`Проанализировано: ${analyzedPositions.length}`);
-            console.log(`Пропущено (некорректные строки): ${skippedCount}`);
-            console.log(`Найдено кодов: ${foundCount}`);
-            console.log(`Не найдено: ${notFoundCount}`);
-            console.log(`Предупреждений (коэффициенты): ${warningCount}`);
-            console.log(`Запрещено (реставрация): ${notAllowedCount}`);
-            console.log(`Текстовых строк (цена поставщика): ${textCount}`);
-            console.log(`Коэффициенты совпадают: ${coefficientMatches}`);
-            console.log(`Коэффициенты НЕ совпадают: ${coefficientMismatches}`);
-            if (skippedExamples.length > 0) {
-                console.log(`Примеры пропущенных строк:`, skippedExamples);
+            // ========== ВЫВОД СТАТИСТИКИ ПРОПУСКОВ ==========
+        
+            
+            if (skippedCount > 0) {
+       
+                for (const [reason, count] of Object.entries(skippedReasonGroups)) {
+                
+                }
+                
+            
+                for (let i = 0; i < Math.min(10, skippedReasons.length); i++) {
+                    const s = skippedReasons[i];
+
+                }
             }
+            
+      
 
             // ========== СОХРАНЕНИЕ СЕССИИ ==========
             const totalMrAmount = parsedPositions.reduce((sum, p) => sum + (p.mrTotalAmount || 0), 0);
@@ -372,13 +395,14 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                     totalPositions: parsedPositions.length,
                     analyzedPositions: analyzedPositions.length,
                     skippedCount: skippedCount,
+                    skippedReasonGroups: skippedReasonGroups,
+                    skippedExamples: skippedReasons.slice(0, 15),
                     foundCount, notFoundCount, warningCount, notAllowedCount, textCount,
                     coefficientMatches, coefficientMismatches,
                     totalMrAmount, totalMrRows, positionsWithMr
                 },
                 positions: analyzedPositions,
-                detectedColumns: parseResult.detectedColumns,
-                skippedExamples: skippedExamples
+                detectedColumns: parseResult.detectedColumns
             });
 
         } catch (error) {
@@ -391,20 +415,73 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
 });
 
 // ==================== АНАЛИЗ КС-2 ====================
+
+/**
+ * Проверка некорректных строк для КС-2
+ */
+function checkInvalidKs2CodeString(str) {
+    if (!str || typeof str !== 'string') {
+        return { isInvalid: true, reason: 'Пустое значение' };
+    }
+    
+    const trimmed = str.trim();
+    
+    if (trimmed === '') {
+        return { isInvalid: true, reason: 'Пустая строка шифра' };
+    }
+    
+    if (trimmed === '9999990001') {
+        return { isInvalid: true, reason: 'Служебный код 9999990001' };
+    }
+    
+    if (/^\d$/.test(trimmed)) {
+        return { isInvalid: true, reason: `Одиночная цифра "${trimmed}"` };
+    }
+    
+    if (/^\d{2}$/.test(trimmed)) {
+        return { isInvalid: true, reason: `Двузначное число "${trimmed}"` };
+    }
+    
+    if (/^\d{3}$/.test(trimmed)) {
+        return { isInvalid: true, reason: `Трёхзначное число "${trimmed}"` };
+    }
+    
+    if (trimmed.length > 50) {
+        return { isInvalid: true, reason: `Слишком длинная строка (>50 символов)` };
+    }
+    
+    return { isInvalid: false, reason: null };
+}
+
 async function enrichKs2Items(items) {
     const sessionCodeCache = new Map();
     let coefficientMatches = 0;
     let coefficientMismatches = 0;
     let warningCount = 0;
     let notAllowedCount = 0;
+    let skippedCount = 0;
+    const skippedItems = [];
 
     const enriched = [];
 
     for (const item of items) {
         const extractedCode = item.code || null;
         
-        // Пропускаем некорректные коды
-        if (isInvalidCodeString(extractedCode)) {
+        // Проверяем на некорректность
+        const invalidCheck = checkInvalidKs2CodeString(extractedCode);
+        
+        if (invalidCheck.isInvalid) {
+            skippedCount++;
+            skippedItems.push({
+                position: item.ks2_position_number || item.position || '?',
+                code: extractedCode,
+                reason: invalidCheck.reason,
+                name: item.name,
+                total: item.total
+            });
+            
+    
+            
             enriched.push({
                 ...item,
                 details: Array.isArray(item.details) ? item.details : [],
@@ -412,7 +489,7 @@ async function enrichKs2Items(items) {
                 matchType: 'invalid',
                 status: 'Обратите внимание',
                 statusCategory: 'warning',
-                description: '⚠️ Некорректное значение в колонке шифра',
+                description: `⚠️ Некорректное значение в колонке шифра: ${invalidCheck.reason}`,
                 coefficientMatch: null,
                 expectedCoefficient: null,
                 hasDetails: Array.isArray(item.details) && item.details.length > 0
@@ -452,12 +529,23 @@ async function enrichKs2Items(items) {
         });
     }
 
+    // Выводим статистику пропусков КС-2
+    if (skippedCount > 0) {
+    
+        for (let i = 0; i < Math.min(10, skippedItems.length); i++) {
+            const s = skippedItems[i];
+        
+        }
+    }
+
     return {
         items: enriched,
         coefficientMatches,
         coefficientMismatches,
         warningCount,
-        notAllowedCount
+        notAllowedCount,
+        skippedCount,
+        skippedItems
     };
 }
 
@@ -475,6 +563,7 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
         const allResults = [];
         let totalItems = 0;
         let totalAmount = 0;
+        let totalSkippedCount = 0;
         let totalSavedCount = 0;
         const sessionIds = [];
 
@@ -486,6 +575,7 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
             try {
                 const fileBuffer = fs.readFileSync(filePath);
                 const parseResult = parseKS2(fileBuffer, displayName);
+                
                 if (!parseResult.success) {
                     allResults.push({ fileName: displayName, error: parseResult.error, success: false });
                     continue;
@@ -496,6 +586,10 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
 
                 const enriched = await enrichKs2Items(parseResult.items);
                 const estimateName = `КС-2: ${displayName}`;
+                
+                totalSkippedCount += enriched.skippedCount;
+                totalItems += parseResult.totalItems;
+                totalAmount += parseResult.totalAmount;
 
                 await logsDb.createSession(sessionId, {
                     user: { fullname: user.fullname, institution: user.institution },
@@ -516,8 +610,6 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
 
                 const savedCount = await logsDb.saveKs2Items(sessionId, displayName, idx + 1, enriched.items);
                 totalSavedCount += savedCount;
-                totalItems += parseResult.totalItems;
-                totalAmount += parseResult.totalAmount;
 
                 if (projectId) {
                     await logsDb.updateProjectSession(projectId, userId, sessionId, estimateName, displayName);
@@ -535,7 +627,9 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
                         coefficientMatches: enriched.coefficientMatches,
                         coefficientMismatches: enriched.coefficientMismatches,
                         warningCount: enriched.warningCount,
-                        notAllowedCount: enriched.notAllowedCount
+                        notAllowedCount: enriched.notAllowedCount,
+                        skippedCount: enriched.skippedCount,
+                        skippedItems: enriched.skippedItems.slice(0, 10)
                     },
                     detectedColumns: parseResult.detectedColumns,
                     startRow: parseResult.startRow
@@ -549,12 +643,16 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
             }
         }
 
+        // Общая сводка по КС-2
+
+
         res.json({
             success: true,
             filesCount: ks2Files.length,
             totalItems,
             totalAmount,
             totalAmountFormatted: totalAmount.toLocaleString('ru-RU'),
+            totalSkippedCount,
             results: allResults,
             savedCount: totalSavedCount,
             sessionIds

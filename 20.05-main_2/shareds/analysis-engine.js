@@ -9,11 +9,11 @@ const codesDb = require('../../shareds/codes-db');
 const logsDb = require('../../shareds/logs-db');
 const usersDb = require('../../shareds/users-db');
 const { parseFullEstimate } = require('../../shareds/estimate-parser');
-console.log(`\n=== ДИАГНОСТИКА КОЭФФИЦИЕНТОВ ===`);
+
 for (let i = 0; i < Math.min(20, data.length); i++) {
     const row = data[i];
     if (row && row[6]) { // колонка G
-        console.log(`Строка ${i+1}, колонка G: "${row[6]}"`);
+        
     }
 }
 function fixFilename(filename) {
@@ -325,13 +325,13 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
                 } else {
                     coefficientMatch = false;
                     coefficientMismatches++;
-                    description = " Завышения коэфицента Требуется обоснование.";
+                    description = " ";
                     showInWarning = true;
                 }
             } else {
                 coefficientMatch = false;
                 coefficientMismatches++;
-                description = " Завышения коэфицента Требуется обоснование.";
+                description = " ";
                 showInWarning = true;
             }
         } else if (isCoefficientLow) {

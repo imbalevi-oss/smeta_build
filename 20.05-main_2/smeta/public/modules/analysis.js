@@ -3,7 +3,7 @@
 
 import { AppState, updateState } from './state.js';
 import { showLoading, hideLoading, showError, showSuccess } from './ui-notifications.js';
-import { safeArray, safeNumber, safeObject } from '../utils/helpers.js';
+import { safeArray, safeNumber, safeObject, escapeHtml } from '../utils/helpers.js';
 import { filterAndDisplayResults, showEstimateResultsView } from './results-renderer.js';
 import { loadProjectHistory } from './projects.js';
 
@@ -20,40 +20,25 @@ function isProblemPosition(pos) {
  * Отображение общей статистики (главная сумма – общая по смете)
  * Дополнительно показывает количество МР строк и позиций с МР.
  */
-function displayStats(positions, stats, totalAmount) {
+function displayStats(positions, stats, totalAmount, skippedInfo = null) {
     const totalMrRows = stats.totalMrRows || 0;
     const positionsWithMr = stats.positionsWithMr || 0;
     const warningCount = positions.filter(p => p.statusCategory === 'warning').length;
     const notAllowedCount = positions.filter(p => p.statusCategory === 'notallowed').length;
     const textCount = positions.filter(p => p.statusCategory === 'text' || p.isTextPosition === true).length;
 
+    let skippedHtml = '';
+    if (skippedInfo && skippedInfo.skippedCount > 0) {
+        skippedHtml = `
+           
+        `;
+    }
+
     const statsHtml = `
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 20px; padding: 24px; margin-bottom: 24px;">
-            <div style="color: rgba(255,255,255,0.8); font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">
-                📊 ИТОГОВАЯ СУММА СМЕТЫ
-            </div>
-            <div style="color: white; font-size: 36px; font-weight: 800;">
-                ${totalAmount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
-            </div>
-            <div style="color: rgba(255,255,255,0.6); font-size: 12px; margin-top: 8px;">
-                📦 МР строк: ${totalMrRows} | 📋 Позиций с МР: ${positionsWithMr}
-            </div>
-        </div>
+        ${skippedHtml}
+     
         
-        <div class="stats-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">
-            <div class="stat-item" style="background: white; border-radius: 16px; padding: 20px; text-align: center;">
-                <div style="font-size: 28px; font-weight: 800; color: #f59e0b;">${warningCount}</div>
-                <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">⚠️ Требуют внимания</div>
-            </div>
-            <div class="stat-item" style="background: white; border-radius: 16px; padding: 20px; text-align: center;">
-                <div style="font-size: 28px; font-weight: 800; color: #ef4444;">${notAllowedCount}</div>
-                <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">❌ Нельзя применять</div>
-            </div>
-            <div class="stat-item" style="background: white; border-radius: 16px; padding: 20px; text-align: center;">
-                <div style="font-size: 28px; font-weight: 800; color: #8b5cf6;">${textCount}</div>
-                <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">📝 Цена поставщика</div>
-            </div>
-        </div>
+    
     `;
     
     const statsEl = document.getElementById('stats');
@@ -142,8 +127,20 @@ export async function uploadNewVersionToProject() {
         const problemPositions = positions.filter(isProblemPosition);
         updateState('currentResults', problemPositions);
 
-        // Отображаем статистику: общая сумма + дополнительная информация о МР
-        displayStats(positions, stats, totalAmount);
+        // Информация о пропущенных позициях
+        const skippedInfo = {
+            skippedCount: stats.skippedCount || 0,
+            skippedReasonGroups: stats.skippedReasonGroups || {},
+            skippedExamples: stats.skippedExamples || []
+        };
+
+        // Логируем в консоль информацию о пропусках
+        if (skippedInfo.skippedCount > 0) {
+
+        }
+
+        // Отображаем статистику: общая сумма + дополнительная информация о МР и пропусках
+        displayStats(positions, stats, totalAmount, skippedInfo);
 
         const hasProblems = problemPositions.length > 0;
         const resultsEl = document.getElementById('results');
@@ -176,6 +173,12 @@ export async function uploadNewVersionToProject() {
                         ✅ Ошибок не найдено
                     </h3>
                     <p style="color:#9ca3af;">Все коды в порядке</p>
+                    ${skippedInfo.skippedCount > 0 ? `
+                    <div style="margin-top: 16px; padding: 12px; background: #fef3c7; border-radius: 12px; max-width: 400px; margin-left: auto; margin-right: auto;">
+                        <i class="fas fa-info-circle" style="color: #d97706;"></i>
+                        <span style="color: #92400e; font-size: 13px;">Пропущено ${skippedInfo.skippedCount} позиций с некорректными шифрами</span>
+                    </div>
+                    ` : ''}
                 `;
             }
         }
@@ -184,9 +187,11 @@ export async function uploadNewVersionToProject() {
         const fullReportBtn = document.getElementById('fullReportBtn');
         const excelReportBtn = document.getElementById('excelReportBtn');
         const resetBtn = document.getElementById('resetBtn');
+        const copyLetterBtn = document.getElementById('copyLetterBtn');
         if (fullReportBtn) fullReportBtn.classList.remove('hidden');
         if (excelReportBtn) excelReportBtn.classList.remove('hidden');
         if (resetBtn) resetBtn.classList.remove('hidden');
+        if (copyLetterBtn) copyLetterBtn.classList.remove('hidden');
 
         updateState('currentFilter', 'all');
         filterAndDisplayResults();
@@ -198,13 +203,15 @@ export async function uploadNewVersionToProject() {
         const notAllowedCount = stats.notAllowedCount || 0;
         const mrRows = stats.totalMrRows || 0;
         const positionsWithMr = stats.positionsWithMr || 0;
+        const skipped = stats.skippedCount || 0;
 
         let successMessage = `Анализ завершён: ⚠️ ${warningCount}, ❌ ${notAllowedCount}`;
         if (mrRows > 0) successMessage += `, 📦 МР: ${mrRows} строк (${positionsWithMr} позиций)`;
+        if (skipped > 0) successMessage += `, ⏭️ пропущено: ${skipped} (некорректные шифры)`;
         showSuccess(successMessage);
 
     } catch (error) {
-        console.error('[analysis] Ошибка:', error);
+      
         showError(error.message || 'Ошибка при выполнении анализа');
     } finally {
         hideLoading();
@@ -238,14 +245,17 @@ export function displayResultsFromSession(session) {
         positionsWithMr,
         warningCount: allPositions.filter(p => p.statusCategory === 'warning').length,
         notAllowedCount: allPositions.filter(p => p.statusCategory === 'notallowed').length,
-        textCount: allPositions.filter(p => p.statusCategory === 'text' || p.isTextPosition).length
+        textCount: allPositions.filter(p => p.statusCategory === 'text' || p.isTextPosition).length,
+        skippedCount: 0, // Из сессии нет информации о пропусках
+        skippedReasonGroups: {},
+        skippedExamples: []
     };
 
     const problemPositions = allPositions.filter(isProblemPosition);
     updateState('currentResults', problemPositions);
 
     // Отображаем общую сумму
-    displayStats(allPositions, stats, totalAmount);
+    displayStats(allPositions, stats, totalAmount, null);
 
     const hasProblems = problemPositions.length > 0;
     const resultsEl = document.getElementById('results');
@@ -328,10 +338,12 @@ export function showEmptyState() {
     const fullReportBtn = document.getElementById('fullReportBtn');
     const excelReportBtn = document.getElementById('excelReportBtn');
     const resetBtn = document.getElementById('resetBtn');
+    const copyLetterBtn = document.getElementById('copyLetterBtn');
     
     if (fullReportBtn) fullReportBtn.classList.add('hidden');
     if (excelReportBtn) excelReportBtn.classList.add('hidden');
     if (resetBtn) resetBtn.classList.add('hidden');
+    if (copyLetterBtn) copyLetterBtn.classList.add('hidden');
 }
 
 // Экспорт для совместимости

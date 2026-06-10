@@ -1,5 +1,5 @@
 // shareds/estimate-parser.js
-// ЕДИНЫЙ ПАРСЕР СМЕТ (с поддержкой всех деталей, объёмов и динамического определения колонок)
+// ЕДИНЫЙ ПАРСЕР СМЕТ (ИСПРАВЛЕННАЯ ВЕРСИЯ С ПОДРОБНЫМ ЛОГИРОВАНИЕМ)
 
 const XLSX = require('xlsx');
 
@@ -57,17 +57,13 @@ function parseNumberWithComma(value) {
     let str = String(value).trim();
     if (str === '') return null;
     
-    // Удаляем пробелы
     str = str.replace(/\s/g, '');
-    
-    // Удаляем символы валют и другие нечисловые префиксы
     str = str.replace(/^[*хx≈~=<>+\\/|:;₽руб\s]+/i, '');
     
     if (str === '') return null;
     
     let result;
     
-    // Обработка разных форматов чисел
     if (str.includes(',') && str.includes('.')) {
         const lastComma = str.lastIndexOf(',');
         const lastDot = str.lastIndexOf('.');
@@ -92,13 +88,11 @@ function parseNumberWithComma(value) {
         result = str;
     }
     
-    // Оставляем только цифры, минус и точку
     const cleaned = result.replace(/[^\d.\-]/g, '');
     let num = parseFloat(cleaned);
     
     if (isNaN(num)) return null;
     
-    // Нормализация коэффициента - округление до 2 знаков
     if (num > 0.01 && num < 100 && num !== Math.floor(num)) {
         const normalized = Math.round(num * 100) / 100;
         return normalized;
@@ -120,18 +114,15 @@ function extractNumericValue(str) {
 function extractUnit(str) {
     if (!str) return '';
     const strClean = String(str).trim();
-    // Если строка состоит только из букв и допустимых символов – это единица
     if (/^[а-яА-ЯёЁa-zA-Z][а-яА-ЯёЁa-zA-Z\/\.²³]*$/.test(strClean)) {
         return strClean.replace('2', '²').replace('3', '³');
     }
-    // Ищем единицу после числа
     const match = strClean.match(/\d+(?:[.,]\d+)?\s*([а-яА-ЯёЁa-zA-Z0-9\/\.²³]+)/);
     if (match && match[1]) {
         let unit = match[1].trim();
         unit = unit.replace('2', '²').replace('3', '³');
         return unit;
     }
-    // Если строка не похожа на число – возвращаем её как единицу
     if (!/^[\d\s.,-]+$/.test(strClean) && strClean.length > 0) {
         return strClean;
     }
@@ -173,22 +164,13 @@ function isMR(text) {
     return false;
 }
 
-// ==================== ИЗВЛЕЧЕНИЕ КОДА (РАСШИРЕННОЕ) ====================
+// ==================== ИЗВЛЕЧЕНИЕ КОДА ====================
 
-// shareds/estimate-parser.js
-
-/**
- * Стоп-слова и фразы, которые не могут быть шифрами расценок
- */
 const STOP_WORDS = [
-    'цена поставщика', 'поставщик', 'материал', 'работа', 'услуга',
-    'приложение', 'письмо', 'разъяснение', 'минстрой', 'поправка',
-    'примечание', 'сноска', 'в том числе', 'в т.ч.', 'итого', 'всего'
+    'цена поставщика', 'поставщик', 'приложение', 'письмо', 'разъяснение',
+    'минстрой', 'поправка', 'примечание', 'сноска'
 ];
 
-/**
- * Проверяет, содержит ли строка стоп-слова
- */
 function containsStopWords(str) {
     const lowerStr = str.toLowerCase();
     for (const word of STOP_WORDS) {
@@ -199,45 +181,47 @@ function containsStopWords(str) {
     return false;
 }
 
-
 /**
- * Извлекает код расценки из строки.
- * 
- * Правила (в порядке приоритета):
- * 1. Строка длиннее 50 символов → не код (цена поставщика)
- * 2. Строка содержит стоп-слова → не код (цена поставщика)
- * 3. Строка соответствует паттерну шифра → извлекаем код
- * 4. Иначе → текст (цена поставщика)
+ * ИСПРАВЛЕННАЯ: извлечение кода из строки
+ * Теперь более щадящая - не отбрасывает потенциально валидные коды
  */
 function extractCodeFromStrings(str) {
     if (!str || typeof str !== 'string') return { code: null, comment: '' };
     const trimmed = str.trim();
     if (trimmed === '') return { code: null, comment: '' };
     
-    // Паттерны кодов расценок (от более специфичных к общим)
+    // Если строка начинается с "цена поставщика" - это текстовая строка
+    if (trimmed.toLowerCase().startsWith('цена поставщика')) {
+        return { code: null, comment: trimmed };
+    }
+    
+    // Паттерны кодов расценок
     const patterns = [
         // Полные шифры с нормативом
-        /^(\d+\.\d+-\d+-\d+-\d+\/\d+)/,      // 11.01-001-01-01/1
-        /^(\d+\.\d+-\d+-\d+-\d+)/,           // 11.01-001-01-01
-        /^(\d+\.\d+-\d+-\d+)/,               // 11.01-001-01
-        /^(\d{1,2}-\d{2}-\d{3}-\d{2}(?:\/\d+)?)/, // 11-01-001-01/1
-        /^(\d{1,2}-\d{2}-\d{3}-\d{2})/,      // 11-01-001-01
-        /^(\d{1,2}\.\d{2}-\d{3}-\d{2})/,     // 11.01-001-01
-        /^(\d{1,2}\.\d{2}\.\d{3}\.\d{2})/,   // 11.01.001.01
+        /^(\d+\.\d+-\d+-\d+-\d+\/\d+)/,
+        /^(\d+\.\d+-\d+-\d+-\d+)/,
+        /^(\d+\.\d+-\d+-\d+)/,
+        /^(\d{1,2}-\d{2}-\d{3}-\d{2}(?:\/\d+)?)/,
+        /^(\d{1,2}-\d{2}-\d{3}-\d{2})/,
+        /^(\d{1,2}\.\d{2}-\d{3}-\d{2})/,
+        /^(\d{1,2}\.\d{2}\.\d{3}\.\d{2})/,
         
-        // С префиксом (ГЭСН, ФЕР, ТЕР и т.д.)
+        // С префиксом
         /^(?:ГЭСН|ФЕР|ТЕР|СН|МТСН|ТСН|МРР|ГСН|СНиП)?\s*(\d{1,2}[.-]\d{2}[.-]\d{3}[.-]\d{2}(?:-\d+)?(?:\/\d+)?)/i,
         
         // Упрощённые форматы
-        /^(\d+\.\d+\.\d+\.\d+)/,             // 11.01.001.01
-        /^(\d+\.\d+-\d+-\d+)/,               // 11.01-001-01
-        /^(\d+-\d+-\d+-\d+)/,                // 11-01-001-01
+        /^(\d+\.\d+\.\d+\.\d+)/,
+        /^(\d+\.\d+-\d+-\d+)/,
+        /^(\d+-\d+-\d+-\d+)/,
         
-        // Сборники и разделы
-        /^(\d{2}\.\d{2}-\d{2,3})/,            // 47.01-013
-        /^(\d{2}-\d{2}-\d{2,3})/,             // 47-01-013
-        /^(\d+\.\d+\.\d+)/,                   // 11.01.001
-        /^(\d+\.\d+)/                         // 11.01
+        // Сборники и разделы (только если есть несколько компонентов)
+        /^(\d{2}\.\d{2}-\d{2,3})/,
+        /^(\d{2}-\d{2}-\d{2,3})/,
+        /^(\d+\.\d+\.\d+)/,
+        
+        // ВАЖНО: код из 5 цифр с точкой (например "11.01" - это сборник)
+        /^(\d{2}\.\d{2})/,
+        /^(\d{2}\.\d{1})/,
     ];
     
     // Ищем паттерн в НАЧАЛЕ строки
@@ -245,13 +229,12 @@ function extractCodeFromStrings(str) {
         const match = trimmed.match(pattern);
         if (match) {
             let code = match[1];
-            // Пропускаем слишком короткие коды (одна-две цифры)
+            // Пропускаем слишком короткие коды (одна-две цифры без точки)
             if (/^\d{1,2}$/.test(code)) {
                 continue;
             }
             code = code.replace(/[^0-9.\-\/]/g, '');
             if (code && code.length >= 4) {
-                // Остаток строки после кода - комментарий (не влияет на определение)
                 const comment = trimmed.substring(match[0].length).trim();
                 return { code, comment };
             }
@@ -262,141 +245,345 @@ function extractCodeFromStrings(str) {
     return { code: null, comment: trimmed };
 }
 
-
-
-
 // ==================== ФУНКЦИИ ПОИСКА ЗАГОЛОВКОВ И КОЛОНОК ====================
 
+/**
+ * ПОИСК СТРОК ЗАГОЛОВКОВ
+ * Возвращает массив индексов строк, которые содержат заголовки таблицы
+ */
 function findHeaderRows(data) {
     const headerRows = [];
     const headerKeywords = PARSER_CONFIG.universal.headerKeywords;
+    
+ 
+    
     for (let i = 0; i < Math.min(50, data.length); i++) {
         const row = data[i];
         if (!row) continue;
-        const rowStr = row.map(c => String(c || '').toLowerCase()).join(' ');
-        let hasHeaderWord = false;
-        for (const kw of headerKeywords) {
-            if (rowStr.includes(kw)) {
-                hasHeaderWord = true;
-                break;
+        
+        let matchCount = 0;
+        const matchedKeywords = [];
+        
+        // Проверяем первые 10 колонок
+        for (let col = 0; col < Math.min(row.length, 10); col++) {
+            const cell = String(row[col] || '').toLowerCase();
+            for (const kw of headerKeywords) {
+                if (cell.includes(kw)) {
+                    matchCount++;
+                    if (!matchedKeywords.includes(kw)) matchedKeywords.push(kw);
+                    break;
+                }
             }
         }
-        if (hasHeaderWord) headerRows.push(i);
+        
+        // Если нашли хотя бы 2 ключевых слова в строке - это строка заголовка
+        if (matchCount >= 2) {
+            headerRows.push(i);
+            
+        }
     }
+    
+    if (headerRows.length === 0) {
+        
+    } else {
+ 
+    }
+    
     return headerRows;
 }
 
+/**
+ * ОПРЕДЕЛЕНИЕ КОЛОНОК ИЗ МНОГОСТРОЧНОГО ЗАГОЛОВКА
+ * Объединяет все строки заголовков и ищет ключевые слова
+ */
 function detectColumnsFromMultiRowHeader(data, headerRows) {
+    
+    
     const columns = { position: -1, code: -1, coefficient: -1, amount: -1 };
     const keywords = PARSER_CONFIG.columnKeywords;
     const headerCells = [];
+    
+
+    
+    // Объединяем все строки заголовков
     for (const rowIdx of headerRows) {
         const row = data[rowIdx];
         if (!row) continue;
+        
+        
         for (let colIdx = 0; colIdx < row.length; colIdx++) {
             const cell = String(row[colIdx] || '').toLowerCase();
             if (!headerCells[colIdx]) headerCells[colIdx] = '';
             headerCells[colIdx] += ' ' + cell;
         }
     }
+    
+    // Анализируем объединённые заголовки
+ 
+    
     headerCells.forEach((cellStr, index) => {
         if (!cellStr) return;
-        if (columns.position === -1 && keywords.position.some(kw => cellStr.includes(kw))) columns.position = index;
-        if (columns.code === -1 && keywords.code.some(kw => cellStr.includes(kw))) columns.code = index;
-        if (columns.coefficient === -1 && keywords.coefficient.some(kw => cellStr.includes(kw))) columns.coefficient = index;
-        if (columns.amount === -1 && keywords.amount.some(kw => cellStr.includes(kw))) columns.amount = index;
+        
+        if (columns.position === -1 && keywords.position.some(kw => cellStr.includes(kw))) {
+            columns.position = index;
+        
+        }
+        if (columns.code === -1 && keywords.code.some(kw => cellStr.includes(kw))) {
+            columns.code = index;
+      
+        }
+        if (columns.coefficient === -1 && keywords.coefficient.some(kw => cellStr.includes(kw))) {
+            columns.coefficient = index;
+
+        }
+        if (columns.amount === -1 && keywords.amount.some(kw => cellStr.includes(kw))) {
+            columns.amount = index;
+  
+        }
     });
+    
+
+    
     return columns;
 }
+/**
+ * ДИАГНОСТИКА ПЕРВЫХ СТРОК ПОСЛЕ ЗАГОЛОВКА
+ * Выводит содержимое первых 10 строк для отладки
+ */
+function diagnoseFirstRows(data, startRow, codeCol, positionCol, coeffCol) {
 
+    
+    for (let i = startRow; i < Math.min(startRow + 15, data.length); i++) {
+        const row = data[i];
+        if (!row) {
+
+            continue;
+        }
+        
+        const position = row[positionCol] ? String(row[positionCol]).trim() : '(пусто)';
+        const code = row[codeCol] ? String(row[codeCol]).trim() : '(пусто)';
+        const coeff = row[coeffCol] ? String(row[coeffCol]).trim() : '(пусто)';
+        const name = row[2] ? String(row[2]).trim().substring(0, 40) : '(пусто)';
+
+    }
+    
+
+}
+/**
+ * ПОИСК КОЛОНКИ С СУММАМИ
+ * Сначала ищет по заголовкам, затем по содержимому
+ */
 function detectAmountColumnUniversal(data, headerRows) {
+
+    
+    let foundCol = null;
+    
+    // Сначала ищем по заголовкам
+  
+    
     for (const headerRowIdx of headerRows) {
         const headerRow = data[headerRowIdx];
         if (!headerRow) continue;
+        
         for (let col = 0; col < headerRow.length; col++) {
             const cell = String(headerRow[col] || '').toLowerCase();
-            if (cell.includes('всего затрат') || cell === 'всего затрат, руб.' || cell.includes('итого затрат') ||
-                cell.includes('всего затрат, руб') || cell === 'всего' || cell === 'итого') {
-                return col;
+            // Ключевые слова для суммы
+            if (cell.includes('всего затрат') || cell === 'всего затрат, руб.' || 
+                cell.includes('итого затрат') || cell.includes('всего затрат, руб') || 
+                cell === 'всего' || cell === 'итого' || cell.includes('сумма')) {
+                foundCol = col;
+                
+                return foundCol;
             }
         }
     }
-    const startRow = headerRows.length > 0 ? Math.max(...headerRows) + 1 : 27;
+    
+    // Если не нашли по заголовкам, ищем по содержимому
+   
+    
+    const startSearchRow = headerRows.length > 0 ? Math.max(...headerRows) + 1 : 27;
     const columnSums = {};
-    for (let i = startRow; i < Math.min(startRow + 300, data.length); i++) {
+    const columnCounts = {};
+    
+    for (let i = startSearchRow; i < Math.min(startSearchRow + 100, data.length); i++) {
         const row = data[i];
         if (!row) continue;
+        
+        // Пропускаем итоговые строки
         const firstCell = row[0] ? String(row[0]).toLowerCase() : '';
-        if (firstCell.includes('итого')) continue;
+        if (firstCell.includes('итого') || firstCell.includes('всего')) continue;
+        
         for (let col = 5; col < Math.min(row.length, 15); col++) {
             const amount = parseNumberWithComma(row[col]);
-            if (amount !== null && amount > 1000 && amount < 1000000000) {
+            if (amount !== null && amount > 100 && amount < 10000000000) {
                 if (!columnSums[col]) columnSums[col] = 0;
+                if (!columnCounts[col]) columnCounts[col] = 0;
                 columnSums[col] += amount;
+                columnCounts[col]++;
             }
         }
     }
-    let bestCol = 9;
+    
+
+    for (let col = 5; col <= 12; col++) {
+        const sum = columnSums[col] || 0;
+        const count = columnCounts[col] || 0;
+        if (count > 0) {
+            
+        }
+    }
+    
+    let bestCol = 9; // колонка J по умолчанию
     let maxSum = 0;
     for (let col = 5; col <= 12; col++) {
         const sum = columnSums[col] || 0;
-        if (sum > maxSum) {
+        const count = columnCounts[col] || 0;
+        if (sum > maxSum && count > 2) {
             maxSum = sum;
             bestCol = col;
         }
     }
+    
+   
     return bestCol;
 }
 
+/**
+ * ОПРЕДЕЛЕНИЕ СТРОКИ НАЧАЛА ДАННЫХ
+ * Ищет первую строку после заголовка, которая содержит реальные данные (шифр или номер позиции)
+ */
 function findDataStartRow(data, headerRows) {
-    if (!headerRows || headerRows.length === 0) return 27;
+
+    
+    if (!headerRows || headerRows.length === 0) {
+     
+        return 27;
+    }
+    
     const lastHeaderRow = Math.max(...headerRows);
-    for (let i = lastHeaderRow + 1; i < Math.min(lastHeaderRow + 15, data.length); i++) {
+   
+    
+    // Начинаем поиск со следующей строки после заголовка
+    let startSearchRow = lastHeaderRow + 1;
+
+    
+    // Пропускаем пустые строки
+    let emptySkipped = 0;
+    while (startSearchRow < data.length) {
+        const row = data[startSearchRow];
+        if (!row || row.length === 0 || row.every(cell => !cell || String(cell).trim() === '')) {
+        
+            startSearchRow++;
+            emptySkipped++;
+            continue;
+        }
+        break;
+    }
+    
+    if (emptySkipped > 0) {
+     
+    }
+    
+    // Ищем первую строку, которая содержит ШИФР (код расценки)
+    // Это более надёжно, чем поиск номера позиции
+    for (let i = startSearchRow; i < Math.min(startSearchRow + 30, data.length); i++) {
         const row = data[i];
         if (!row) continue;
-        for (let j = 0; j < Math.min(5, row.length); j++) {
-            if (isPositionNumber(row[j])) return i;
+        
+        // Проверяем колонки B, C, D (индексы 1, 2, 3) на наличие шифра
+        for (let col = 1; col <= 4; col++) {
+            const cell = row[col];
+            if (!cell) continue;
+            
+            const cellStr = String(cell).trim();
+            // Шифр обычно содержит цифры, точки и дефисы
+            if (/^\d+\.\d+/.test(cellStr) || /^\d+-\d+/.test(cellStr)) {
+              
+                return i;
+            }
+        }
+        
+        // Если не нашли шифр, проверяем номер позиции в колонке A
+        const positionCell = row[0];
+        if (positionCell && isPositionNumber(positionCell)) {
+          
+            return i;
         }
     }
-    return lastHeaderRow + 1;
+    
+    // Если ничего не нашли, возвращаем первую непустую строку после заголовка
+  
+    return startSearchRow;
 }
 
+/**
+ * ПРОВЕРКА ЯВЛЯЕТСЯ ЛИ СТРОКА НОМЕРОМ ПОЗИЦИИ
+ * Форматы: 1, 2, 3, 1.1, 2.1, 1.1.1
+ */
 function isPositionNumber(str) {
     if (!str && str !== 0) return false;
     const trimmed = String(str).trim();
     if (trimmed === '') return false;
-    const normalized = trimmed.replace(/,/g, '.');
-    return /^\d+(\.\d+)*$/.test(normalized);
-}
+    
+    // Номера позиций: только цифры и точки
+    const pattern = /^\d+(\.\d+)*$/;
+    const result = pattern.test(trimmed);
+    
+    // Дополнительная проверка: номер позиции не должен содержать букв
+    const hasLetters = /[а-яА-Яa-zA-Z]/.test(trimmed);
+    
+    // Логируем результат для отладки (только первые 10)
+    if (result && !hasLetters) {
 
-// shareds/estimate-parser.js - ИСПРАВЛЕННАЯ isPureText
-/*
-* Проверяет, является ли строка ценой поставщика (текстовой строкой)
-* ПРАВИЛО: если есть код - НЕ цена поставщика. Если нет кода - цена поставщика.
-*/
+    }
+    
+    return result && !hasLetters;
+}
+/**
+ * ПРОВЕРКА ЯВЛЯЕТСЯ ЛИ СТРОКА ЗАГОЛОВКОМ ТАБЛИЦЫ
+ */
+function isHeaderRow(str) {
+    if (!str) return false;
+    const lowerStr = String(str).toLowerCase();
+    const headerWords = ['№', 'п/п', 'шифр', 'расценки', 'наименование', 'ед.изм', 'количество', 'цена', 'сумма', 'итого'];
+    return headerWords.some(word => lowerStr.includes(word));
+}
+/**
+ * ИСПРАВЛЕННАЯ: проверка на чистый текст
+ * Только явные признаки "цены поставщика"
+ */
+/**
+ * ПРОВЕРКА ЯВЛЯЕТСЯ ЛИ СТРОКА ТЕКСТОВОЙ (ЦЕНА ПОСТАВЩИКА)
+ * Только явные маркеры считаются текстом
+ */
 function isPureText(str) {
-   if (!str || typeof str !== 'string') return false;
-   const trimmed = str.trim();
-   if (trimmed === '') return false;
-   
-   // Пытаемся извлечь код
-   const { code } = extractCodeFromStrings(str);
-   
-   // ЕСТЬ КОД → НЕ цена поставщика
-   if (code !== null) {
-       return false;
-   }
-   
-   // НЕТ КОДА → цена поставщика
-   return true;
+    if (!str || typeof str !== 'string') return false;
+    const trimmed = str.trim();
+    if (trimmed === '') return false;
+    
+    // Явные маркеры текстовой строки
+    const lowerTrimmed = trimmed.toLowerCase();
+    if (lowerTrimmed.startsWith('цена поставщика')) return true;
+    if (lowerTrimmed.startsWith('материал по цене поставщика')) return true;
+    if (lowerTrimmed.startsWith('стоимость материала по')) return true;
+    if (lowerTrimmed.startsWith('прайс лист')) return true;
+    if (lowerTrimmed.startsWith('прайс-лист')) return true;
+    if (lowerTrimmed.startsWith('прайс-лист ')) return true;
+
+    // Если есть код - точно не текст
+    const { code } = extractCodeFromStrings(str);
+    if (code !== null) return false;
+    
+    // Если строка длинная и нет кода - вероятно текст
+    if (trimmed.length > 30 && !code) return true;
+    
+    return false;
 }
 
-// ==================== ОСНОВНАЯ ФУНКЦИЯ ПАРСИНГА (УЛУЧШЕННАЯ) ====================
-
-// shareds/estimate-parser.js - ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ
+// ==================== ОСНОВНАЯ ФУНКЦИЯ ПАРСИНГА (ИСПРАВЛЕННАЯ) ====================
 
 function parseFullEstimate(fileBuffer) {
-    console.log(`\n========== ПАРСИНГ СМЕТЫ ==========`);
+
 
     try {
         const workbook = XLSX.read(fileBuffer, { type: 'buffer', cellDates: true });
@@ -417,15 +604,10 @@ function parseFullEstimate(fileBuffer) {
         const coeffCol = 6;          // Всегда колонка G (7-я в Excel)
         const positionCol = columns.position !== -1 ? columns.position : 0;    // A
 
-        console.log(`Определённые колонки:`);
-        console.log(`  Позиция: ${positionCol + 1} (${String.fromCharCode(65 + positionCol)})`);
-        console.log(`  Код: ${codeCol + 1} (${String.fromCharCode(65 + codeCol)})`);
-        console.log(`  Коэффициент: ${coeffCol + 1} (${String.fromCharCode(65 + coeffCol)})`);
-        console.log(`  Сумма: ${amountCol + 1} (${String.fromCharCode(65 + amountCol)})`);
-        console.log(`Начальная строка данных: ${startRow + 1}`);
+       
 
         // ==================== ДИАГНОСТИКА КОЭФФИЦИЕНТОВ ====================
-        console.log(`\n--- ДИАГНОСТИКА КОЭФФИЦИЕНТОВ ---`);
+       
         
         let coeffFound = false;
         for (let i = startRow; i < Math.min(startRow + 50, data.length); i++) {
@@ -437,23 +619,23 @@ function parseFullEstimate(fileBuffer) {
                 const val = parseNumberWithComma(cell);
                 if (val !== null && val !== 0 && val !== 1 && val > 0.01 && val < 100) {
                     coeffFound = true;
-                    console.log(`  ✅ Найден коэффициент в колонке ${coeffCol+1}, строка ${i+1}: "${cell}" -> ${val}`);
+                   
                 }
             }
         }
 
         if (!coeffFound) {
-            console.log(`  ⚠️ Коэффициенты в колонке ${coeffCol+1} не найдены`);
+            
         }
 
-        // ==================== СБОР ПОЗИЦИЙ ====================
+        // ==================== СБОР ПОЗИЦИЙ (ИСПРАВЛЕННАЯ ЛОГИКА) ====================
         const positions = [];
         let i = startRow;
         let positionCounter = 0;
         let skippedZeroSum = 0;
-        let coeffDebugCount = 0;
+        let debugPositions = [];
 
-        console.log(`\n--- ПАРСИНГ ПОЗИЦИЙ ---`);
+   
 
         while (i < data.length) {
             const row = data[i];
@@ -463,65 +645,88 @@ function parseFullEstimate(fileBuffer) {
             }
 
             const codeRaw = row[codeCol] ? String(row[codeCol]).trim() : '';
+            
+            // Пропускаем пустые строки
             if (codeRaw === '') { 
                 i++; 
                 continue; 
             }
+            
+            // Пропускаем строки-заголовки
+            const codeLower = codeRaw.toLowerCase();
+            if (codeLower.includes('шифр') || codeLower.includes('расценки') || 
+                codeLower.includes('наименование') || codeLower.includes('ед.изм')) {
+                i++;
+                continue;
+            }
 
-            // Проверяем наличие номера позиции
-            const positionValue = row[positionCol] ? String(row[positionCol]).trim() : '';
-            const hasPositionNumber = positionValue && isPositionNumber(positionValue);
-
-            const { code: extractedCode } = extractCodeFromStrings(codeRaw);
-            const isTextPos = !extractedCode && isPureText(codeRaw);
-
-            // Пропускаем строки, которые не являются ни кодом, ни текстовой позицией
-            if (!extractedCode && !isTextPos) { 
-                i++; 
-                continue; 
+            // Проверяем конец документа
+            const firstCell = row[0] ? String(row[0]).toLowerCase() : '';
+            if (firstCell.includes('составил') || firstCell.includes('проверил') ||
+                firstCell.includes('начальник') || firstCell.includes('главный инженер') ||
+                firstCell.includes('руководитель')) {
+               
+                break;
             }
 
             positionCounter++;
+
+            // Получаем номер позиции (если есть)
+            const positionValue = row[positionCol] ? String(row[positionCol]).trim() : '';
+            const hasPositionNumber = positionValue && isPositionNumber(positionValue);
+            const positionNumber = hasPositionNumber ? positionValue : String(positionCounter);
+
+            // Извлекаем код
+            const { code: extractedCode, comment: codeComment } = extractCodeFromStrings(codeRaw);
+            const isTextPos = !extractedCode && isPureText(codeRaw);
+            
+            // Логируем найденную позицию
+         
 
             // ========== ПАРСИНГ КОЭФФИЦИЕНТА ==========
             let coeffValue = null;
             let coeffSource = '';
             
-            // Проверяем текущую строку в колонке коэффициентов
+            // Проверяем текущую строку
             const coeffCellRaw = row[coeffCol];
             if (coeffCellRaw !== undefined && coeffCellRaw !== null && String(coeffCellRaw).trim() !== '') {
                 const parsed = parseNumberWithComma(coeffCellRaw);
                 if (parsed !== null && parsed !== 0 && parsed !== 1 && parsed > 0.01 && parsed < 100) {
                     coeffValue = parsed;
-                    coeffSource = `строка ${i+1}, колонка ${coeffCol+1}`;
+                    coeffSource = `строка ${i+1}`;
                 }
             }
             
-            // Если не нашли, ищем в следующих строках (до 5 строк)
+            // Если не нашли, ищем в следующих 7 строках (но не дальше следующей позиции)
             if (!coeffValue) {
-                for (let offset = 1; offset <= 5; offset++) {
+                let maxOffset = 7;
+                for (let offset = 1; offset <= maxOffset; offset++) {
                     const nextRow = data[i + offset];
                     if (!nextRow) break;
+                    
+                    // Проверяем, не началась ли новая позиция
+                    const nextCodeRaw = nextRow[codeCol] ? String(nextRow[codeCol]).trim() : '';
+                    const nextPositionVal = nextRow[positionCol] ? String(nextRow[positionCol]).trim() : '';
+                    if (nextCodeRaw !== '' && (isPositionNumber(nextPositionVal) || extractCodeFromStrings(nextCodeRaw).code)) {
+                        break; // Новая позиция, прекращаем поиск
+                    }
                     
                     const nextCoeff = nextRow[coeffCol];
                     if (nextCoeff !== undefined && nextCoeff !== null && String(nextCoeff).trim() !== '') {
                         const parsed = parseNumberWithComma(nextCoeff);
                         if (parsed !== null && parsed !== 0 && parsed !== 1 && parsed > 0.01 && parsed < 100) {
                             coeffValue = parsed;
-                            coeffSource = `строка ${i+offset+1}, колонка ${coeffCol+1}`;
+                            coeffSource = `строка ${i+offset+1}`;
                             break;
                         }
                     }
                 }
             }
             
-            // Логируем найденные коэффициенты (первые 20)
-            if (coeffValue && coeffDebugCount < 20) {
-                console.log(`  Позиция ${positionCounter}: найден коэффициент ${coeffValue} (${coeffSource})`);
-                coeffDebugCount++;
-            } else if (!coeffValue && coeffDebugCount < 20) {
-                console.log(`  Позиция ${positionCounter}: коэффициент НЕ НАЙДЕН`);
-                coeffDebugCount++;
+            if (coeffValue) {
+
+            } else {
+             
             }
 
             // Нормализация коэффициента
@@ -529,30 +734,37 @@ function parseFullEstimate(fileBuffer) {
                 ? Math.round(coeffValue * 100) / 100 
                 : null;
 
-            // ========== СБОР ДЕТАЛЕЙ ==========
+            // ========== СБОР ДЕТАЛЕЙ (ЗП, ЭМ, МР, НР, СП) ==========
             let details = [];
             let j = i + 1;
+            let detailCount = 0;
+            
+           
             
             while (j < data.length) {
                 const nextRow = data[j];
                 if (!nextRow) break;
 
                 const nextCodeRaw = nextRow[codeCol] ? String(nextRow[codeCol]).trim() : '';
+                const nextPositionVal = nextRow[positionCol] ? String(nextRow[positionCol]).trim() : '';
                 const nextExtracted = extractCodeFromStrings(nextCodeRaw).code;
-                
-                // Проверяем, не является ли следующая строка началом новой позиции
-                const nextPositionValue = nextRow[positionCol] ? String(nextRow[positionCol]).trim() : '';
-                const hasNextPositionNumber = nextPositionValue && isPositionNumber(nextPositionValue);
                 
                 // УСЛОВИЯ ДЛЯ ЗАВЕРШЕНИЯ ПОЗИЦИИ:
                 // 1. Следующая строка имеет номер позиции (начинается новая позиция)
-                // 2. Следующая строка содержит другой код (не деталь)
-                // 3. Следующая строка - чисто текстовая (цена поставщика)
-                if (hasNextPositionNumber) {
+                if (nextPositionVal && isPositionNumber(nextPositionVal)) {
+                
                     break;
                 }
                 
-                if ((nextExtracted && nextExtracted !== extractedCode) || isPureText(nextCodeRaw)) {
+                // 2. Следующая строка содержит другой код (не деталь)
+                if (nextExtracted && nextExtracted !== extractedCode) {
+         
+                    break;
+                }
+                
+                // 3. Следующая строка - текстовая позиция
+                if (isPureText(nextCodeRaw)) {
+           
                     break;
                 }
 
@@ -561,11 +773,30 @@ function parseFullEstimate(fileBuffer) {
                     j++; 
                     continue; 
                 }
+                
+                // Проверяем, является ли строка детальной (ЗП, ЭМ, МР, НР, СП)
+                const detailNameLower = detailName.toLowerCase();
+                const isDetail = detailNameLower === 'зп' || detailNameLower === 'эм' || 
+                                detailNameLower === 'мр' || detailNameLower === 'нр' || 
+                                detailNameLower === 'сп' || detailNameLower === 'зтр' ||
+                                detailNameLower.startsWith('зп ') || detailNameLower.startsWith('эм ') ||
+                                detailNameLower.startsWith('мр ') || detailNameLower.startsWith('нр ') ||
+                                detailNameLower.startsWith('сп ');
+                
+                if (!isDetail) {
+                    // Не деталь - возможно, это описание или комментарий
+   
+                    j++;
+                    continue;
+                }
 
+                detailCount++;
                 const detailAmount = parseNumber(nextRow[amountCol]);
                 const detailQuantity = parseNumber(nextRow[quantityCol]);
                 const detailPrice = parseNumber(nextRow[priceCol]);
                 const detailUnit = nextRow[unitCol] ? String(nextRow[unitCol]).trim() : '';
+
+   
 
                 details.push({
                     type: detailName,
@@ -579,7 +810,6 @@ function parseFullEstimate(fileBuffer) {
             }
 
             // Основные данные позиции
-            const positionNumber = positionValue || String(positionCounter);
             const name = row[nameCol] ? String(row[nameCol]).trim() : '';
             const unit = row[unitCol] ? String(row[unitCol]).trim() : '';
             const quantity = parseNumber(row[quantityCol]);
@@ -589,9 +819,11 @@ function parseFullEstimate(fileBuffer) {
             const sumDetails = details.reduce((s, d) => s + d.amount, 0);
             const totalAmount = amountFromRow + sumDetails;
 
+ 
+
             // ⭐ ПРОПУСКАЕМ ПОЗИЦИИ С НУЛЕВОЙ СУММОЙ
             if (totalAmount === 0) {
-                console.log(`  Позиция ${positionCounter}: пропущена (сумма = 0)`);
+             
                 skippedZeroSum++;
                 i = j;
                 continue;
@@ -633,13 +865,6 @@ function parseFullEstimate(fileBuffer) {
         const totalFullAmount = positions.reduce((s, p) => s + p.totalAmount, 0);
         const totalMrAmount = positions.reduce((s, p) => s + p.mrTotalAmount, 0);
 
-        console.log(`\n--- РЕЗУЛЬТАТ ПАРСИНГА ---`);
-        console.log(`Всего позиций: ${positions.length}`);
-        console.log(`Пропущено позиций с нулевой суммой: ${skippedZeroSum}`);
-        console.log(`Позиций с коэффициентами: ${positions.filter(p => p.coefficient !== null).length}`);
-        console.log(`Позиций без коэффициентов: ${positions.filter(p => p.coefficient === null).length}`);
-        console.log(`Общая сумма: ${totalFullAmount.toLocaleString('ru-RU')} ₽`);
-        console.log(`=========================================\n`);
 
         return {
             success: true,
@@ -671,6 +896,7 @@ function parseFullEstimate(fileBuffer) {
         };
     }
 }
+
 /**
  * Упрощённый интерфейс для analyze.js
  */
@@ -723,12 +949,6 @@ function parseEstimate(fileBuffer, originalName) {
     };
 }
 
-/**
- * Построение индекса всех коэффициентов в документе
- * @param {Array} data - данные из Excel
- * @param {number} coeffCol - номер колонки с коэффициентами
- * @returns {Map} Map где ключ - номер строки, значение - коэффициент
- */
 function buildCoefficientIndex(data, coeffCol) {
     const coefficientIndex = new Map();
     
@@ -737,7 +957,6 @@ function buildCoefficientIndex(data, coeffCol) {
         if (!row) continue;
         
         const coeffVal = parseNumberWithComma(row[coeffCol]);
-        // Сохраняем только коэффициенты, отличные от 0 и 1
         if (coeffVal !== null && coeffVal !== 0 && coeffVal !== 1) {
             coefficientIndex.set(i, coeffVal);
         }
@@ -746,15 +965,7 @@ function buildCoefficientIndex(data, coeffCol) {
     return coefficientIndex;
 }
 
-/**
- * Поиск коэффициента из индекса
- * @param {Map} coefficientIndex - индекс коэффициентов
- * @param {number} startRow - строка, с которой начинаем поиск
- * @param {number} maxLinesDown - максимальное количество строк для поиска вниз
- * @returns {Object} результат поиска
- */
 function findCoefficientFromIndex(coefficientIndex, startRow, maxLinesDown) {
-    // Сначала проверяем текущую строку
     if (coefficientIndex.has(startRow)) {
         return {
             value: coefficientIndex.get(startRow),
@@ -763,7 +974,6 @@ function findCoefficientFromIndex(coefficientIndex, startRow, maxLinesDown) {
         };
     }
     
-    // Затем ищем вниз
     for (let offset = 1; offset <= maxLinesDown; offset++) {
         const checkRow = startRow + offset;
         if (coefficientIndex.has(checkRow)) {
@@ -782,81 +992,149 @@ function findCoefficientFromIndex(coefficientIndex, startRow, maxLinesDown) {
     };
 }
 
-// ==================== ДОПОЛНИТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ СОВМЕСТИМОСТИ ====================
-
+/**
+ * ПОИСК КОЛОНКИ С НОМЕРАМИ ПОЗИЦИЙ
+ * Проверяет колонки A, B, C на наличие номеров позиций
+ */
 function detectPositionColumn(data, startRow) {
-    // Ищем первую строку, где в колонке A есть номер позиции
-    for (let i = startRow; i < Math.min(startRow + 50, data.length); i++) {
-        const row = data[i];
-        if (row && row[0] && isPositionNumber(row[0])) return 0;
-        if (row && row[1] && isPositionNumber(row[1])) return 1;
-    }
-    return 0; // по умолчанию колонка A
-}
 
-function detectCodeColumn(data, startRow) {
-    // Ищем колонку с шифром (обычно B или C)
-    for (let i = startRow; i < Math.min(startRow + 50, data.length); i++) {
-        const row = data[i];
-        if (!row) continue;
-        for (let col = 1; col <= 3; col++) {
-            const cell = row[col];
-            if (cell && typeof cell === 'string' && /^\d+\.\d+/.test(cell.trim())) {
-                return col;
-            }
-        }
-    }
-    return 1; // по умолчанию B
-}
-
-function detectCoefficientColumn(data, startRow) {
-    // Расширенный поиск колонки коэффициентов по заголовкам
-    const coeffKeywords = ['поправоч', 'коэфф', 'коэффициент', 'coeff', 'k', 'зимн', 'удорож', 'пересчет'];
     
-    // Сначала ищем в первых 30 строках заголовки
-    for (let i = 0; i < Math.min(30, data.length); i++) {
+    // Проверяем первые 20 строк данных
+    for (let i = startRow; i < Math.min(startRow + 20, data.length); i++) {
         const row = data[i];
         if (!row) continue;
-        for (let col = 0; col < row.length; col++) {
-            const cell = String(row[col] || '').toLowerCase();
-            // Проверяем на точное совпадение с "Попра-вочные коэфф."
-            if (cell.includes('попра-вочные') || cell.includes('поправочные')) {
-                console.log(`[detectCoefficientColumn] Найдена колонка коэффициентов: ${col+1} (${String.fromCharCode(65+col)}) по заголовку "${row[col]}"`);
-                return col;
-            }
-            for (const kw of coeffKeywords) {
-                if (cell.includes(kw)) {
-                    console.log(`[detectCoefficientColumn] Найдена колонка коэффициентов: ${col+1} (${String.fromCharCode(65+col)}) по ключевому слову "${kw}"`);
+
+        
+        // Проверяем колонки A, B, C (индексы 0, 1, 2)
+        for (let col = 0; col <= 3; col++) {
+            const cell = row[col];
+            if (!cell) continue;
+            
+            const cellStr = String(cell).trim();
+            const isPosition = isPositionNumber(cellStr);
+            
+          
+            
+            // Номер позиции - это число, часто с точкой (1, 2, 3 или 1.1, 2.1)
+            if (isPosition) {
+                // Дополнительная проверка: номер позиции обычно не содержит букв
+                if (!/[а-яА-Я]/.test(cellStr)) {
+                   
                     return col;
                 }
             }
         }
     }
     
-    // Если не нашли, ищем по наличию чисел отличных от 0,1 в диапазоне 0.01-100
+
+    return 0;
+}
+
+/**
+ * ПОИСК КОЛОНКИ С ШИФРАМИ РАСЦЕНОК
+ * Проверяет колонки B, C, D, E на наличие шифров (цифры с точками/дефисами)
+ */
+function detectCodeColumn(data, startRow) {
+
+    
+    let foundCol = null;
+    let foundRow = null;
+    let foundCode = null;
+    
+    // Проверяем первые 30 строк данных
+    for (let i = startRow; i < Math.min(startRow + 30, data.length); i++) {
+        const row = data[i];
+        if (!row) continue;
+        
+        // Проверяем колонки B, C, D, E (индексы 1, 2, 3, 4)
+        for (let col = 1; col <= 4; col++) {
+            const cell = row[col];
+            if (!cell) continue;
+            
+            const cellStr = String(cell).trim();
+            // Шифр расценки: цифры, точки, дефисы, часто с префиксом
+            const isCode = /^\d+\.\d+/.test(cellStr) || /^\d+-\d+/.test(cellStr);
+            
+            if (isCode && cellStr.length >= 5) {
+                foundCol = col;
+                foundRow = i;
+                foundCode = cellStr;
+                break;
+            }
+        }
+        
+        if (foundCol !== null) break;
+    }
+    
+    if (foundCol !== null) {
+      
+        return foundCol;
+    }
+    
+
+    return 1;
+}
+
+/**
+ * ПОИСК КОЛОНКИ С КОЭФФИЦИЕНТАМИ
+ * Сначала ищет по заголовкам, затем по содержимому
+ */
+function detectCoefficientColumn(data, startRow) {
+
+    
+    const coeffKeywords = ['поправоч', 'коэфф', 'коэффициент', 'coeff', 'k', 'зимн', 'удорож', 'пересчет'];
+    
+    // Сначала ищем по заголовкам в первых 30 строках
+    
+    
+    for (let i = 0; i < Math.min(30, data.length); i++) {
+        const row = data[i];
+        if (!row) continue;
+        for (let col = 0; col < row.length; col++) {
+            const cell = String(row[col] || '').toLowerCase();
+            // Проверяем на точное совпадение
+            if (cell.includes('попра-вочные') || cell.includes('поправочные')) {
+  ;
+                return col;
+            }
+            for (const kw of coeffKeywords) {
+                if (cell.includes(kw)) {
+                   
+                    return col;
+                }
+            }
+        }
+    }
+    
+ 
+    
     for (let col = 6; col <= 9; col++) { // колонки G, H, I, J
         let coeffCount = 0;
+        let coeffValues = [];
+        
         for (let i = startRow; i < Math.min(startRow + 50, data.length); i++) {
             const row = data[i];
             if (!row) continue;
             const val = parseNumberWithComma(row[col]);
             if (val !== null && val !== 0 && val !== 1 && val > 0.01 && val < 100) {
                 coeffCount++;
+                coeffValues.push(val);
             }
         }
+        
         if (coeffCount >= 3) {
-            console.log(`[detectCoefficientColumn] Выбрана колонка ${col+1} (${String.fromCharCode(65+col)}) по содержимому (найдено ${coeffCount} коэффициентов)`);
+
             return col;
         }
     }
     
-    return 6; // по умолчанию G (индекс 6)
+ 
+    return 6;
 }
 
 function extractTotalAmount(data, amountCol) {
     let totalAmount = 0;
     let foundRow = null;
-    // Ищем строки с "Итого", "Всего" в первой колонке и берём сумму из amountCol
     const totalKeywords = ['итого', 'всего', 'всего по смете', 'всего с ндс'];
     for (let i = data.length - 1; i >= 0; i--) {
         const row = data[i];
@@ -871,7 +1149,6 @@ function extractTotalAmount(data, amountCol) {
             }
         }
     }
-    // Если не нашли, пробуем взять сумму из amountCol в последней строке
     if (totalAmount === 0 && data.length > 0) {
         const lastRow = data[data.length - 1];
         if (lastRow && lastRow[amountCol]) {

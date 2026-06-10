@@ -367,10 +367,10 @@ export function renderUnifiedTable(positions) {
             statusHtml = '<span class="badge badge-danger">❌ Нельзя применять</span>';
             reasonText = pos.description || 'Код запрещён к применению';
         } else if (pos.coefficientMatch === false) {
-            statusHtml = '<span class="badge badge-warning">⚠️ Коэффициент завышен</span>';
+            statusHtml = '<span class="badge badge-warning">Обартите внимаение</span>';
             reasonText = pos.description || `Коэффициент ${pos.actualCoefficient} превышает норму`;
         } else if (pos.status === 'Обратите внимание') {
-            statusHtml = '<span class="badge badge-warning">⚠️ Требует внимания</span>';
+            statusHtml = '<span class="badge badge-warning">Обартите внимаение</span>';
             reasonText = pos.description || 'Требуется проверка';
         } else if (pos.status === 'НЕ НАЙДЕН' || pos.found === false) {
             statusHtml = '<span class="badge badge-danger">❌ Не найден</span>';
@@ -727,8 +727,8 @@ function showReasonsSummary(positions) {
     }
     const summaryHtml = `
         <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; padding:8px 0;">
-            ${reasonsCount.coefficient_high > 0 ? `<div style="background:#fef3c7; border-radius:10px; padding:8px 14px; display:flex; align-items:center; gap:8px;"><span>📈</span><div><div style="font-weight:700; color:#92400e;">${reasonsCount.coefficient_high}</div><div style="font-size:10px; color:#78350f;">Коэф. завышен</div></div></div>` : ''}
-            ${reasonsCount.coefficient_low > 0 ? `<div style="background:#fef3c7; border-radius:10px; padding:8px 14px; display:flex; align-items:center; gap:8px;"><span>📉</span><div><div style="font-weight:700; color:#92400e;">${reasonsCount.coefficient_low}</div><div style="font-size:10px; color:#78350f;">Коэф. занижен</div></div></div>` : ''}
+            ${reasonsCount.coefficient_high > 0 ? `<div style="background:#fef3c7; border-radius:10px; padding:8px 14px; display:flex; align-items:center; gap:8px;"><span>📈</span><div><div style="font-weight:700; color:#92400e;">${reasonsCount.coefficient_high}</div><div style="font-size:10px; color:#78350f;">Обратите внимание</div></div></div>` : ''}
+            ${reasonsCount.coefficient_low > 0 ? `<div style="background:#fef3c7; border-radius:10px; padding:8px 14px; display:flex; align-items:center; gap:8px;"><span>📉</span><div><div style="font-weight:700; color:#92400e;">${reasonsCount.coefficient_low}</div><div style="font-size:10px; color:#78350f;">Обратите внимание</div></div></div>` : ''}
             ${reasonsCount.restoration > 0 ? `<div style="background:#fee2e2; border-radius:10px; padding:8px 14px; display:flex; align-items:center; gap:8px;"><span>🏛️</span><div><div style="font-weight:700; color:#991b1b;">${reasonsCount.restoration}</div><div style="font-size:10px; color:#7f1d1d;">Реставрационные</div></div></div>` : ''}
             ${reasonsCount.forbidden > 0 ? `<div style="background:#fee2e2; border-radius:10px; padding:8px 14px; display:flex; align-items:center; gap:8px;"><span>❌</span><div><div style="font-weight:700; color:#991b1b;">${reasonsCount.forbidden}</div><div style="font-size:10px; color:#7f1d1d;">Запрещены</div></div></div>` : ''}
             ${reasonsCount.text > 0 ? `<div style="background:#ede9fe; border-radius:10px; padding:8px 14px; display:flex; align-items:center; gap:8px;"><span>📝</span><div><div style="font-weight:700; color:#6d28d9;">${reasonsCount.text}</div><div style="font-size:10px; color:#4c1d95;">Цена поставщика</div></div></div>` : ''}
