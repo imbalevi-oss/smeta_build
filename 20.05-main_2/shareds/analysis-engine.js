@@ -303,7 +303,7 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
         if (isRestorationCode) {
             category = 'notallowed';
             status = 'Нельзя применять';
-            description = '🏛️ Реставрационные работы (отделы 51-59). Применение запрещено.';
+            description = 'Реставрационные работы (отделы 51-59). Применение запрещено.';
             showInWarning = true;
             statusCounts.notAllowed++;
         } else if (isForbidden) {
@@ -346,7 +346,7 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
                 status = 'Обратите внимание';
                 coefficientMatch = false;
                 coefficientMismatches++;
-                description = `⚠️ Коэффициент ${formatNumber(actualCoefficient)} не соответствует ожидаемому (${formatNumber(expectedCoefficient)}).`;
+                description = ``;
                 showInWarning = true;
             } else {
                 coefficientMatch = true;

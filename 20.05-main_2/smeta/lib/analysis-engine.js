@@ -22,7 +22,7 @@ const {
     normalizePositionNumber, 
     isHeaderRow, 
     isPureText, 
-    extractCodeFromStrings,   // ← исправлено: добавили 's'
+    extractCodeFromStrings,
     extractTotalAmount, 
     parseNumberWithComma, 
     formatNumber,
@@ -66,41 +66,33 @@ async function performAnalysis(filePath, originalName, userId, isRevised, projec
     
     const moscowTime = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
 
-    
     const workbook = xlsx.readFile(filePath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     
-   
-    
-   // ==================== УНИВЕРСАЛЬНОЕ ОПРЕДЕЛЕНИЕ КОЛОНОК ====================
-const headerRows = findHeaderRows(data);
-let positionCol, codeCol, coeffCol, amountCol, startRow, searchCoefficientLines;
+    // ==================== УНИВЕРСАЛЬНОЕ ОПРЕДЕЛЕНИЕ КОЛОНОК ====================
+    const headerRows = findHeaderRows(data);
+    let positionCol, codeCol, coeffCol, amountCol, startRow, searchCoefficientLines;
 
-// ПРИНУДИТЕЛЬНО: коэффициенты всегда из колонки G (индекс 6)
-coeffCol = 6;
+    // ПРИНУДИТЕЛЬНО: коэффициенты всегда из колонки G (индекс 6)
+    coeffCol = 6;
 
-if (headerRows.length > 0) {
-    const detectedColumns = detectColumnsFromMultiRowHeader(data, headerRows);
-    const lastHeaderRow = Math.max(...headerRows);
-    
-    positionCol = detectedColumns.position !== -1 ? detectedColumns.position : detectPositionColumn(data, lastHeaderRow + 1);
-    codeCol = detectedColumns.code !== -1 ? detectedColumns.code : detectCodeColumn(data, lastHeaderRow + 1);
-    // НЕ используем detectedColumns.coefficient и НЕ вызываем detectCoefficientColumn
-    amountCol = detectAmountColumnUniversal(data, headerRows);
-    startRow = findDataStartRow(data, headerRows);
-} else {
-    startRow = 27;
-    positionCol = detectPositionColumn(data, startRow);
-    codeCol = detectCodeColumn(data, startRow);
-    // НЕ вызываем detectCoefficientColumn
-    amountCol = detectAmountColumnUniversal(data, []);
-}
+    if (headerRows.length > 0) {
+        const detectedColumns = detectColumnsFromMultiRowHeader(data, headerRows);
+        const lastHeaderRow = Math.max(...headerRows);
+        
+        positionCol = detectedColumns.position !== -1 ? detectedColumns.position : detectPositionColumn(data, lastHeaderRow + 1);
+        codeCol = detectedColumns.code !== -1 ? detectedColumns.code : detectCodeColumn(data, lastHeaderRow + 1);
+        amountCol = detectAmountColumnUniversal(data, headerRows);
+        startRow = findDataStartRow(data, headerRows);
+    } else {
+        startRow = 27;
+        positionCol = detectPositionColumn(data, startRow);
+        codeCol = detectCodeColumn(data, startRow);
+        amountCol = detectAmountColumnUniversal(data, []);
+    }
 
-searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
-
-    
-
+    searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
     
     // Название сметы
     let estimateName = '';
@@ -117,25 +109,18 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
     if (!estimateName && data.length > 14 && data[14] && data[14][0]) {
         estimateName = String(data[14][0]).trim();
     }
- 
     
     // Итоговая сумма
     const totalAmountInfo = extractTotalAmount(data, amountCol);
     const totalAmount = totalAmountInfo.totalAmount || 0;
     const foundRow = totalAmountInfo.foundRow;
-    if (totalAmount) {
-       
-    }
     
     // Индекс коэффициентов
     const coefficientIndex = buildCoefficientIndex(data, coeffCol);
-  
     
     // Сбор позиций
     const positionRows = [];
     const END_PHRASES = ['составил', 'проверил', 'начальник', 'главный инженер', 'руководитель'];
-    
-   
     
     for (let i = startRow; i < data.length; i++) {
         const row = data[i];
@@ -149,7 +134,6 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
         );
         
         if (isDocumentEnd) {
-        
             break;
         }
         
@@ -158,13 +142,8 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
         const positionValue = row[positionCol];
         if (positionValue && isPositionNumber(positionValue)) {
             positionRows.push(i);
-            if (positionRows.length <= 20) {
-              
-            }
         }
     }
-    
-
     
     // Результаты анализа
     const results = [];
@@ -189,8 +168,6 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
     const COEFF_TOLERANCE = 0.01;
     let textLines = 0;
     
- 
-    
     for (let idx = 0; idx < positionRows.length; idx++) {
         const currentRow = positionRows[idx];
         const nextPositionRow = positionRows[idx + 1] ?? null;
@@ -207,7 +184,7 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
         const fullCell = String(rawCell).trim();
         if (!fullCell || fullCell === '9999990001') continue;
         
-        // ИЗВЛЕКАЕМ КОД ИЗ СТРОКИ (игнорируем текст после кода)
+        // ИЗВЛЕКАЕМ КОД ИЗ СТРОКИ
         const codeData = extractCodeFromStrings(fullCell);
         const extractedCode = codeData.code;
         const codeComment = codeData.comment;
@@ -259,13 +236,11 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
         
         const coeffResult = findCoefficientFromIndex(coefficientIndex, currentRow, coeffSearchLimit);
         if (coeffResult.found) {
-            // ИСПРАВЛЕНИЕ: округляем коэффициент
             actualCoefficient = coeffResult.value;
             if (actualCoefficient !== null && actualCoefficient !== 1) {
                 actualCoefficient = Math.round(actualCoefficient * 100) / 100;
             }
-        }
-         else {
+        } else {
             for (let offset = 1; offset <= coeffSearchLimit; offset++) {
                 const checkRow = currentRow + offset;
                 if (coefficientIndex.has(checkRow)) {
@@ -275,7 +250,10 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
             }
         }
         
-        // Поиск в БД (только по коду, без текста после него)
+        // Если коэффициент не найден, считаем его = 1
+        const effectiveActual = (actualCoefficient === null || actualCoefficient === 0) ? 1 : actualCoefficient;
+        
+        // Поиск в БД
         const found = await codesDb.findHierarchicalMatch(extractedCode, sessionCodeCache);
         
         // Определение статуса
@@ -294,8 +272,6 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
         const isRestorationCode = (found && found.matchType === 'restoration') || 
                                   (extractedCode && /^5[1-9]\./.test(extractedCode));
         const isForbidden = (found && found.status === 'Нельзя применять');
-        const isCoefficientHigh = (actualCoefficient !== null && actualCoefficient > 1);
-        const isCoefficientLow = (actualCoefficient !== null && actualCoefficient < 1);
         const hasDbCoefficient = (found && found.coefficient_value !== null && found.coefficient_value !== undefined);
         const checkRequired = (found && (found.check_coefficient === 1 || found.check_coefficient === true));
         
@@ -320,65 +296,88 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
             description = 'Код отсутствует в базе данных';
         }
         
-        // Логика определения проблем
+        // ==================== ИСПРАВЛЕННАЯ ЛОГИКА ОПРЕДЕЛЕНИЯ ПРОБЛЕМ ====================
+        
+        // Случай 1: Реставрационные работы
         if (isRestorationCode) {
             category = 'notallowed';
             status = 'Нельзя применять';
-            description = '🏛️ Реставрационные работы (отделы 51-59). Применение запрещено.';
+            description = 'Реставрационные работы (отделы 51-59). Применение запрещено.';
             showInWarning = true;
             statusCounts.notAllowed++;
-        } else if (isForbidden) {
+        } 
+        // Случай 2: Запрещённый код
+        else if (isForbidden) {
             category = 'notallowed';
             status = 'Нельзя применять';
             showInWarning = true;
             statusCounts.notAllowed++;
-        } else if (isCoefficientHigh) {
-            category = 'warning';
-            status = 'Обратите внимание';
-            if (hasDbCoefficient && expectedCoefficient !== null) {
-                if (Math.abs(actualCoefficient - expectedCoefficient) <= COEFF_TOLERANCE) {
-                    coefficientMatch = true;
-                    coefficientMatches++;
-                    description = `✅ Коэффициент ${formatNumber(actualCoefficient)} соответствует ожидаемому (${formatNumber(expectedCoefficient)})`;
-                    category = 'ok';
-                    status = 'Доступен';
-                    showInWarning = false;
-                } else {
-                    coefficientMatch = false;
-                    coefficientMismatches++;
-                    description = `⚠️ Коэффициент ${formatNumber(actualCoefficient)} превышает норму (${formatNumber(expectedCoefficient)}). Требуется обоснование.`;
-                    showInWarning = true;
-                }
+        } 
+        // Случай 3: Есть ожидаемый коэффициент в БД (САМЫЙ ВАЖНЫЙ СЛУЧАЙ)
+        else if (hasDbCoefficient && expectedCoefficient !== null) {
+            // Сравниваем фактический коэффициент с ожидаемым из БД
+            // Неважно, больше 1 или меньше 1 - сравниваем с БД!
+            if (Math.abs(effectiveActual - expectedCoefficient) <= COEFF_TOLERANCE) {
+                // Коэффициент соответствует ожидаемому
+                coefficientMatch = true;
+                coefficientMatches++;
+                description = `✅ Коэффициент ${formatNumber(effectiveActual)} соответствует ожидаемому (${formatNumber(expectedCoefficient)})`;
+                category = 'ok';
+                status = found?.status || 'Доступен';
+                showInWarning = false;
             } else {
+                // Коэффициент НЕ соответствует ожидаемому
                 coefficientMatch = false;
                 coefficientMismatches++;
-                description = `⚠️ Коэффициент ${formatNumber(actualCoefficient)} больше 1. Требуется обоснование.`;
+                if (effectiveActual < expectedCoefficient) {
+                    description = ``;
+                } else {
+                    description = ``;
+                }
+                category = 'warning';
+                status = 'Обратите внимание';
                 showInWarning = true;
             }
-        } else if (isCoefficientLow) {
+        } 
+        // Случай 4: Нет ожидаемого коэффициента в БД, но коэффициент > 1
+        else if (effectiveActual > 1) {
+            category = 'warning';
+            status = 'Обратите внимание';
+            coefficientMatch = false;
+            coefficientMismatches++;
+            description = ``;
+            showInWarning = true;
+        } 
+        // Случай 5: Нет ожидаемого коэффициента в БД, коэффициент < 1 (понижающий)
+        else if (effectiveActual < 1) {
             category = 'ok';
             status = 'Доступен';
-            description = `📉 Понижающий коэффициент: ${formatNumber(actualCoefficient)} (допустимо)`;
+            description = ``;
             showInWarning = false;
             coefficientMatch = null;
-        } else if (checkRequired && hasDbCoefficient && actualCoefficient !== null) {
-            if (Math.abs(actualCoefficient - expectedCoefficient) > COEFF_TOLERANCE) {
+        } 
+        // Случай 6: Проверка обязательного коэффициента
+        else if (checkRequired && hasDbCoefficient && effectiveActual !== null) {
+            if (Math.abs(effectiveActual - expectedCoefficient) > COEFF_TOLERANCE) {
                 category = 'warning';
                 status = 'Обратите внимание';
                 coefficientMatch = false;
                 coefficientMismatches++;
-                description = `⚠️ Коэффициент ${formatNumber(actualCoefficient)} не соответствует ожидаемому (${formatNumber(expectedCoefficient)}).`;
+                description = ``;
                 showInWarning = true;
             } else {
                 coefficientMatch = true;
                 coefficientMatches++;
             }
-        } else {
+        } 
+        // Случай 7: Всё остальное (норма)
+        else {
             category = 'ok';
             status = found ? (status || 'Доступен') : 'НЕ НАЙДЕН';
             showInWarning = false;
         }
         
+        // Подсчёт статистики по категориям
         if (category === 'notallowed') {
             statusCounts.notAllowed++;
         } else if (category === 'warning') {
@@ -389,7 +388,7 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
             statusCounts.notFound++;
         }
         
-        // Добавляем результат (без detailedPos - он будет добавлен позже в analyze.js)
+        // Добавляем результат
         results.push({
             code: fullCell,
             extractedCode: extractedCode,
@@ -399,10 +398,10 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
             matchType: matchType,
             matchedLevel: matchedLevel,
             isRestoration: isRestorationCode,
-            hasCoefficient: (actualCoefficient !== null && actualCoefficient !== 1) || hasCoefficient,
+            hasCoefficient: (effectiveActual !== 1) || hasCoefficient,
             coefficientType: coefficientType,
             expectedCoefficient: expectedCoefficient,
-            actualCoefficient: actualCoefficient,
+            actualCoefficient: effectiveActual,
             coefficientMatch: coefficientMatch,
             coefficientRequired: checkRequired,
             coefficientChecked: checkRequired,
@@ -418,8 +417,6 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
     const foundCount = results.filter(r => r.found && !r.isText).length;
     const notFoundCount = results.filter(r => !r.found && !r.isText && !r.isRestoration).length;
     const problemResults = results.filter(r => r.category === 'warning' || r.category === 'notallowed');
-    
- 
     
     // Сохранение в БД
     await logsDb.createSession(sessionId, {
@@ -447,6 +444,8 @@ searchCoefficientLines = PARSER_CONFIG.universal.searchCoefficientLines || 7;
         status: 'completed',
         project_id: projectId
     });
+    
+    await logsDb.addCodeDetailsBatch(sessionId, results);
     
     return {
         sessionId: sessionId,

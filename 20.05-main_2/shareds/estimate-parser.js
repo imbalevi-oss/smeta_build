@@ -175,40 +175,95 @@ function isMR(text) {
 
 // ==================== ИЗВЛЕЧЕНИЕ КОДА (РАСШИРЕННОЕ) ====================
 
+// shareds/estimate-parser.js
+
+/**
+ * Стоп-слова и фразы, которые не могут быть шифрами расценок
+ */
+const STOP_WORDS = [
+    'цена поставщика', 'поставщик', 'материал', 'работа', 'услуга',
+    'приложение', 'письмо', 'разъяснение', 'минстрой', 'поправка',
+    'примечание', 'сноска', 'в том числе', 'в т.ч.', 'итого', 'всего'
+];
+
+/**
+ * Проверяет, содержит ли строка стоп-слова
+ */
+function containsStopWords(str) {
+    const lowerStr = str.toLowerCase();
+    for (const word of STOP_WORDS) {
+        if (lowerStr.includes(word)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+
+/**
+ * Извлекает код расценки из строки.
+ * 
+ * Правила (в порядке приоритета):
+ * 1. Строка длиннее 50 символов → не код (цена поставщика)
+ * 2. Строка содержит стоп-слова → не код (цена поставщика)
+ * 3. Строка соответствует паттерну шифра → извлекаем код
+ * 4. Иначе → текст (цена поставщика)
+ */
 function extractCodeFromStrings(str) {
     if (!str || typeof str !== 'string') return { code: null, comment: '' };
     const trimmed = str.trim();
     if (trimmed === '') return { code: null, comment: '' };
-    if (trimmed.toLowerCase().startsWith('цена поставщика')) {
-        return { code: trimmed, comment: '' };
-    }
+    
+    // Паттерны кодов расценок (от более специфичных к общим)
     const patterns = [
-        /^(\d+\.\d+-\d+-\d+-\d+\/\d+)/,
-        /^(\d+\.\d+-\d+-\d+-\d+)/,
-        /^(\d+\.\d+-\d+-\d+)/,
-        /^(\d{1,2}-\d{2}-\d{3}-\d{2}(?:\/\d+)?)/,
-        /^(\d{1,2}-\d{2}-\d{3}-\d{2})/,
-        /^(\d{1,2}\.\d{2}-\d{3}-\d{2})/,
-        /^(\d{1,2}\.\d{2}\.\d{3}\.\d{2})/,
-        /^(?:ГЭСН|ФЕР|ТЕР|СН|МТСН|ТСН|МРР)?\s*(\d{1,2}[.-]\d{2}[.-]\d{3}[.-]\d{2}(?:-\d+)?(?:\/\d+)?)/i,
-        /^(\d+\.\d+\.\d+\.\d+)/,
-        /^(\d+\.\d+-\d+-\d+)/,
-        /^(\d+-\d+-\d+-\d+)/,
-        /^(\d+)/
+        // Полные шифры с нормативом
+        /^(\d+\.\d+-\d+-\d+-\d+\/\d+)/,      // 11.01-001-01-01/1
+        /^(\d+\.\d+-\d+-\d+-\d+)/,           // 11.01-001-01-01
+        /^(\d+\.\d+-\d+-\d+)/,               // 11.01-001-01
+        /^(\d{1,2}-\d{2}-\d{3}-\d{2}(?:\/\d+)?)/, // 11-01-001-01/1
+        /^(\d{1,2}-\d{2}-\d{3}-\d{2})/,      // 11-01-001-01
+        /^(\d{1,2}\.\d{2}-\d{3}-\d{2})/,     // 11.01-001-01
+        /^(\d{1,2}\.\d{2}\.\d{3}\.\d{2})/,   // 11.01.001.01
+        
+        // С префиксом (ГЭСН, ФЕР, ТЕР и т.д.)
+        /^(?:ГЭСН|ФЕР|ТЕР|СН|МТСН|ТСН|МРР|ГСН|СНиП)?\s*(\d{1,2}[.-]\d{2}[.-]\d{3}[.-]\d{2}(?:-\d+)?(?:\/\d+)?)/i,
+        
+        // Упрощённые форматы
+        /^(\d+\.\d+\.\d+\.\d+)/,             // 11.01.001.01
+        /^(\d+\.\d+-\d+-\d+)/,               // 11.01-001-01
+        /^(\d+-\d+-\d+-\d+)/,                // 11-01-001-01
+        
+        // Сборники и разделы
+        /^(\d{2}\.\d{2}-\d{2,3})/,            // 47.01-013
+        /^(\d{2}-\d{2}-\d{2,3})/,             // 47-01-013
+        /^(\d+\.\d+\.\d+)/,                   // 11.01.001
+        /^(\d+\.\d+)/                         // 11.01
     ];
+    
+    // Ищем паттерн в НАЧАЛЕ строки
     for (const pattern of patterns) {
         const match = trimmed.match(pattern);
         if (match) {
             let code = match[1];
+            // Пропускаем слишком короткие коды (одна-две цифры)
+            if (/^\d{1,2}$/.test(code)) {
+                continue;
+            }
             code = code.replace(/[^0-9.\-\/]/g, '');
-            if (code && code.length > 2) {
+            if (code && code.length >= 4) {
+                // Остаток строки после кода - комментарий (не влияет на определение)
                 const comment = trimmed.substring(match[0].length).trim();
                 return { code, comment };
             }
         }
     }
+    
+    // Код не найден
     return { code: null, comment: trimmed };
 }
+
+
+
 
 // ==================== ФУНКЦИИ ПОИСКА ЗАГОЛОВКОВ И КОЛОНОК ====================
 
@@ -314,20 +369,31 @@ function isPositionNumber(str) {
     return /^\d+(\.\d+)*$/.test(normalized);
 }
 
+// shareds/estimate-parser.js - ИСПРАВЛЕННАЯ isPureText
+/*
+* Проверяет, является ли строка ценой поставщика (текстовой строкой)
+* ПРАВИЛО: если есть код - НЕ цена поставщика. Если нет кода - цена поставщика.
+*/
 function isPureText(str) {
-    if (!str || typeof str !== 'string') return false;
-    const trimmed = str.trim();
-    if (trimmed.length === 0) return false;
-    const { code } = extractCodeFromStrings(str);
-    if (code) return false;
-    const textPhrases = ['цена поставщика', 'поправка', 'примечание', 'сн-2012', 'сн2012', 'письмо', 'разъяснение', 'минстрой'];
-    const lowerTrimmed = trimmed.toLowerCase();
-    if (textPhrases.some(phrase => lowerTrimmed.includes(phrase))) return true;
-    if (/^[a-zA-Zа-яА-ЯёЁ]/.test(trimmed)) return true;
-    return false;
+   if (!str || typeof str !== 'string') return false;
+   const trimmed = str.trim();
+   if (trimmed === '') return false;
+   
+   // Пытаемся извлечь код
+   const { code } = extractCodeFromStrings(str);
+   
+   // ЕСТЬ КОД → НЕ цена поставщика
+   if (code !== null) {
+       return false;
+   }
+   
+   // НЕТ КОДА → цена поставщика
+   return true;
 }
 
 // ==================== ОСНОВНАЯ ФУНКЦИЯ ПАРСИНГА (УЛУЧШЕННАЯ) ====================
+
+// shareds/estimate-parser.js - ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ
 
 function parseFullEstimate(fileBuffer) {
     console.log(`\n========== ПАРСИНГ СМЕТЫ ==========`);
@@ -348,7 +414,7 @@ function parseFullEstimate(fileBuffer) {
         const unitCol = 3;           // D
         const quantityCol = 4;       // E
         const priceCol = 5;          // F
-        let coeffCol = 6; // Всегда колонка G (7-я в Excel)
+        const coeffCol = 6;          // Всегда колонка G (7-я в Excel)
         const positionCol = columns.position !== -1 ? columns.position : 0;    // A
 
         console.log(`Определённые колонки:`);
@@ -361,10 +427,7 @@ function parseFullEstimate(fileBuffer) {
         // ==================== ДИАГНОСТИКА КОЭФФИЦИЕНТОВ ====================
         console.log(`\n--- ДИАГНОСТИКА КОЭФФИЦИЕНТОВ ---`);
         
-        // Сначала проверим, есть ли вообще какие-то числа в колонке коэффициентов
         let coeffFound = false;
-        let actualCoeffCol = coeffCol;
-        
         for (let i = startRow; i < Math.min(startRow + 50, data.length); i++) {
             const row = data[i];
             if (!row) continue;
@@ -379,25 +442,44 @@ function parseFullEstimate(fileBuffer) {
             }
         }
 
+        if (!coeffFound) {
+            console.log(`  ⚠️ Коэффициенты в колонке ${coeffCol+1} не найдены`);
+        }
+
         // ==================== СБОР ПОЗИЦИЙ ====================
         const positions = [];
         let i = startRow;
         let positionCounter = 0;
+        let skippedZeroSum = 0;
         let coeffDebugCount = 0;
 
         console.log(`\n--- ПАРСИНГ ПОЗИЦИЙ ---`);
 
         while (i < data.length) {
             const row = data[i];
-            if (!row || row.length === 0) { i++; continue; }
+            if (!row || row.length === 0) { 
+                i++; 
+                continue; 
+            }
 
             const codeRaw = row[codeCol] ? String(row[codeCol]).trim() : '';
-            if (codeRaw === '') { i++; continue; }
+            if (codeRaw === '') { 
+                i++; 
+                continue; 
+            }
+
+            // Проверяем наличие номера позиции
+            const positionValue = row[positionCol] ? String(row[positionCol]).trim() : '';
+            const hasPositionNumber = positionValue && isPositionNumber(positionValue);
 
             const { code: extractedCode } = extractCodeFromStrings(codeRaw);
             const isTextPos = !extractedCode && isPureText(codeRaw);
 
-            if (!extractedCode && !isTextPos) { i++; continue; }
+            // Пропускаем строки, которые не являются ни кодом, ни текстовой позицией
+            if (!extractedCode && !isTextPos) { 
+                i++; 
+                continue; 
+            }
 
             positionCounter++;
 
@@ -447,19 +529,38 @@ function parseFullEstimate(fileBuffer) {
                 ? Math.round(coeffValue * 100) / 100 
                 : null;
 
-            // Собираем детали
+            // ========== СБОР ДЕТАЛЕЙ ==========
             let details = [];
             let j = i + 1;
+            
             while (j < data.length) {
                 const nextRow = data[j];
                 if (!nextRow) break;
 
                 const nextCodeRaw = nextRow[codeCol] ? String(nextRow[codeCol]).trim() : '';
                 const nextExtracted = extractCodeFromStrings(nextCodeRaw).code;
-                if ((nextExtracted && nextExtracted !== extractedCode) || isPureText(nextCodeRaw)) break;
+                
+                // Проверяем, не является ли следующая строка началом новой позиции
+                const nextPositionValue = nextRow[positionCol] ? String(nextRow[positionCol]).trim() : '';
+                const hasNextPositionNumber = nextPositionValue && isPositionNumber(nextPositionValue);
+                
+                // УСЛОВИЯ ДЛЯ ЗАВЕРШЕНИЯ ПОЗИЦИИ:
+                // 1. Следующая строка имеет номер позиции (начинается новая позиция)
+                // 2. Следующая строка содержит другой код (не деталь)
+                // 3. Следующая строка - чисто текстовая (цена поставщика)
+                if (hasNextPositionNumber) {
+                    break;
+                }
+                
+                if ((nextExtracted && nextExtracted !== extractedCode) || isPureText(nextCodeRaw)) {
+                    break;
+                }
 
                 const detailName = nextRow[nameCol] ? String(nextRow[nameCol]).trim() : '';
-                if (detailName === '') { j++; continue; }
+                if (detailName === '') { 
+                    j++; 
+                    continue; 
+                }
 
                 const detailAmount = parseNumber(nextRow[amountCol]);
                 const detailQuantity = parseNumber(nextRow[quantityCol]);
@@ -478,7 +579,7 @@ function parseFullEstimate(fileBuffer) {
             }
 
             // Основные данные позиции
-            const positionNumber = row[positionCol] ? String(row[positionCol]).trim() : String(positionCounter);
+            const positionNumber = positionValue || String(positionCounter);
             const name = row[nameCol] ? String(row[nameCol]).trim() : '';
             const unit = row[unitCol] ? String(row[unitCol]).trim() : '';
             const quantity = parseNumber(row[quantityCol]);
@@ -487,6 +588,14 @@ function parseFullEstimate(fileBuffer) {
             const amountFromRow = parseNumber(row[amountCol]);
             const sumDetails = details.reduce((s, d) => s + d.amount, 0);
             const totalAmount = amountFromRow + sumDetails;
+
+            // ⭐ ПРОПУСКАЕМ ПОЗИЦИИ С НУЛЕВОЙ СУММОЙ
+            if (totalAmount === 0) {
+                console.log(`  Позиция ${positionCounter}: пропущена (сумма = 0)`);
+                skippedZeroSum++;
+                i = j;
+                continue;
+            }
 
             const volume = calculateVolume(quantity, unit);
             const formattedVolume = formatVolume(volume, unit);
@@ -526,6 +635,7 @@ function parseFullEstimate(fileBuffer) {
 
         console.log(`\n--- РЕЗУЛЬТАТ ПАРСИНГА ---`);
         console.log(`Всего позиций: ${positions.length}`);
+        console.log(`Пропущено позиций с нулевой суммой: ${skippedZeroSum}`);
         console.log(`Позиций с коэффициентами: ${positions.filter(p => p.coefficient !== null).length}`);
         console.log(`Позиций без коэффициентов: ${positions.filter(p => p.coefficient === null).length}`);
         console.log(`Общая сумма: ${totalFullAmount.toLocaleString('ru-RU')} ₽`);
@@ -540,6 +650,7 @@ function parseFullEstimate(fileBuffer) {
             positions: positions,
             stats: {
                 totalPositions: positions.length,
+                skippedZeroSum: skippedZeroSum,
                 textPositions: positions.filter(p => p.isTextPosition).length,
                 totalMrAmount: totalMrAmount,
                 totalDetailRows: positions.reduce((s, p) => s + p.details.length, 0),
@@ -560,7 +671,6 @@ function parseFullEstimate(fileBuffer) {
         };
     }
 }
-
 /**
  * Упрощённый интерфейс для analyze.js
  */
@@ -579,29 +689,35 @@ function parseEstimate(fileBuffer, originalName) {
         };
     }
 
-    const items = result.positions.map(pos => ({
-        positionNumber: pos.positionNumber,
-        code: pos.code,
-        name: pos.name,
-        totalAmount: pos.totalAmount,
-        quantity: pos.quantity,
-        unit: pos.unit,
-        coefficient: pos.coefficient,
-        isTextPosition: pos.isTextPosition,
-        details: pos.details,
-        mrDetails: pos.mrDetails,
-        mrTotalAmount: pos.mrTotalAmount,
-        volume: pos.volume,
-        formattedVolume: pos.formattedVolume,
-        price: pos.price,
-        rowNumber: pos.rowNumber
-    }));
+    // Фильтруем позиции с нулевой суммой (дополнительная страховка)
+    const items = result.positions
+        .filter(pos => pos.totalAmount !== 0)
+        .map(pos => ({
+            positionNumber: pos.positionNumber,
+            code: pos.code,
+            name: pos.name,
+            totalAmount: pos.totalAmount,
+            quantity: pos.quantity,
+            unit: pos.unit,
+            coefficient: pos.coefficient,
+            isTextPosition: pos.isTextPosition,
+            details: pos.details,
+            mrDetails: pos.mrDetails,
+            mrTotalAmount: pos.mrTotalAmount,
+            volume: pos.volume,
+            formattedVolume: pos.formattedVolume,
+            price: pos.price,
+            rowNumber: pos.rowNumber
+        }));
+
+    // Пересчитываем общую сумму с учётом фильтрации
+    const filteredTotalAmount = items.reduce((sum, item) => sum + item.totalAmount, 0);
 
     return {
         success: true,
         items: items,
-        totalAmount: result.totalAmount,
-        totalAmountFormatted: result.totalAmountFormatted,
+        totalAmount: filteredTotalAmount,
+        totalAmountFormatted: filteredTotalAmount.toLocaleString('ru-RU'),
         sheetName: result.estimateName,
         detectedColumns: { position: 0, code: 1, amount: 9, coefficient: 6 }
     };

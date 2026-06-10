@@ -296,13 +296,7 @@ export async function loadProjectHistory() {
     }
 }
 
-// modules/projects.js
 
-// public/modules/projects.js
-
-// public/modules/projects.js
-
-// public/modules/projects.js - функция renderHistoryList
 
 function renderHistoryList(sessions, currentSessionId) {
     const historyList = document.getElementById('historyList');
@@ -335,7 +329,7 @@ function renderHistoryList(sessions, currentSessionId) {
         else if (session.status === 'started') statusIcon = '⏳';
         
         // Сумма: для сметы — МР, для КС-2 — итог по документу
-        const displayAmount = isKs2 ? session.total_amount : (session.total_mr_amount ?? session.total_amount);
+        let displayAmount = session.total_amount;
         let amountFormatted = '—';
         if (displayAmount && displayAmount > 0) {
             amountFormatted = displayAmount.toLocaleString('ru-RU', {

@@ -35,6 +35,14 @@ export async function copyFilteredCodes() {
             year: 'numeric'
         });
 
+        function getActualCoefficientIfExists(item) {
+            let actual = item.actualCoefficient ?? item.actual_coefficient;
+            if (actual !== null && actual !== undefined && actual !== 0 && actual !== 1) {
+                return actual;
+            }
+            return null;
+        }
+
         function getSpecialCodeText(code, position, actualCoefficient = null) {
             const specialCodes = {
                 '1.49-9201-1-3/1': {
@@ -42,8 +50,8 @@ export async function copyFilteredCodes() {
                     textTemplate: (coeff) => {
                         if (coeff && coeff !== 1) {
                             const coeffFormatted = coeff.toString().replace('.', ',');
-                            return `  В смете применён коэффициент: ${coeffFormatted}. Проверьте обоснованность его применения. Необходимо проверить коэффициент, учитывающий расстояние вывоза строительного мусора, в зависимости от округа, в котором расположен объект ремонта. Коэф. = среднее расстояние перевозки отходов строительства и сноса по округам минус 1 км.
-Данные о расстоянии перевозки отходов строительства и сноса принимаются согласно приложению № 2 к письму Москомэкспертизы от 17.11.2023 № МКЭ-ОД/23-19.
+                            return ` В смете применён коэффициент: ${coeffFormatted}. Проверьте обоснованность его применения. Необходимо проверить коэффициент, учитывающий расстояние вывоза строительного мусора, в зависимости от округа, в котором расположен объект ремонта.
+Коэф. = среднее расстояние перевозки отходов строительства и сноса по округам минус 1 км. Данные о расстоянии перевозки отходов строительства и сноса принимаются согласно приложению № 2 к письму Москомэкспертизы от 17.11.2023 № МКЭ-ОД/23-19.
 `;
                         }
                         return '';
@@ -53,10 +61,26 @@ export async function copyFilteredCodes() {
 
             for (const [key, value] of Object.entries(specialCodes)) {
                 if (code === key || (code && code.includes(key))) {
-                    return { title: value.title, text: value.textTemplate(actualCoefficient) || '' };
+                    const text = value.textTemplate(actualCoefficient);
+                    if (text) {
+                        return { title: value.title, text: text };
+                    }
                 }
             }
             return null;
+        }
+
+        function shouldShowDescription(item) {
+            const matchType = item.matchType || item.match_type || '';
+            
+            const hideDescriptionForTypes = [
+                'chapter', 'collection', 'section', 'parent', 'parent_collection'
+            ];
+            
+            if (hideDescriptionForTypes.includes(matchType)) {
+                return false;
+            }
+            return true;
         }
 
         const notAllowedCodes = currentResults.filter(item =>
@@ -67,13 +91,19 @@ export async function copyFilteredCodes() {
         const warningCodes = currentResults.filter(item => {
             if (item.isText || item.is_text === 1) return false;
             if (item.status === 'Нельзя применять' || item.isRestoration) return false;
-            const actual = getEffectiveActualCoefficient(item);
+            
+            const actual = getActualCoefficientIfExists(item);
             const expected = item.expectedCoefficient ?? item.expected_coefficient ?? 1;
-            const statusWarning = (item.status === 'Обратите внимание');
-            if (statusWarning && actual > expected) return true;
-            const actualIsDefault = (actual === 1 && (item.actualCoefficient === null || item.actualCoefficient === undefined));
-            if (actualIsDefault && expected < 1) return true;
-            if (expected > 1 && Math.abs(actual - expected) < 0.01) return true;
+            
+            // Есть реальный коэффициент больше 1
+            if (actual !== null && actual > 1) return true;
+            
+            // Коэффициента нет, но ожидается не 1
+            if (actual === null && expected !== 1) return true;
+            
+            // Статус "Обратите внимание" И коэффициент завышен
+            if (item.status === 'Обратите внимание' && actual !== null && actual > expected) return true;
+            
             return false;
         });
 
@@ -85,6 +115,7 @@ export async function copyFilteredCodes() {
 
 `;
 
+        // ==================== БЛОК «Нельзя применять» ====================
         if (notAllowedCodes.length > 0) {
             text += `Признак «Нельзя применить»
 Неправомерное применение для объектов отрасли «Образование» стоимостных нормативов, разработанных для объектов, к которым установлены специальные эксплуатационные требования, связанные с их функциональным назначением и конструктивным решением, включая объекты культурного наследия.
@@ -94,8 +125,9 @@ export async function copyFilteredCodes() {
                 const item = notAllowedCodes[i];
                 const code = item.extractedCode || item.code || '—';
                 const position = item.positionNumber || item.position_number || '—';
-                const actual = getEffectiveActualCoefficient(item);
+                const actual = getActualCoefficientIfExists(item);
                 const special = getSpecialCodeText(code, position, actual);
+                
                 let line = `${i+1}. Шифр: ${code} (позиция ${position})`;
                 if (special && special.text) {
                     line += `\n    ${special.text}`;
@@ -108,10 +140,14 @@ export async function copyFilteredCodes() {
                 }
                 text += line + '\n';
             }
-            text += '\n';
         }
 
+        // ==================== БЛОК «Требует внимания» ====================
         if (warningCodes.length > 0) {
+            if (notAllowedCodes.length > 0) {
+                text += '\n';
+            }
+            
             text += `Признак «Требует внимания»
 Информация о необходимости проверки корректности и обоснования применения к стоимостным нормативам повышающих (и/или понижающих) коэффициентов, с учетом условий производства работ и необходимости их обоснования.
 
@@ -120,47 +156,47 @@ export async function copyFilteredCodes() {
                 const item = warningCodes[i];
                 const code = item.extractedCode || item.code || '—';
                 const position = item.positionNumber || item.position_number || '—';
-                const expected = item.expectedCoefficient ?? item.expected_coefficient ?? 1;
-                const actual = getEffectiveActualCoefficient(item);
-                const special = getSpecialCodeText(code, position, actual);
-                let coeffText = '';
-                if ((!special || !special.text) && actual !== null && actual !== undefined && actual !== 1) {
+                const actual = getActualCoefficientIfExists(item);
+                
+                let line = `${i+1}. Шифр: ${code} (позиция ${position})`;
+                
+                if (actual !== null) {
                     const actualFormatted = actual.toString().replace('.', ',');
-                    const expectedFormatted = expected.toString().replace('.', ',');
-                    if (actual > expected) {
-                        coeffText = ` (применённый коэффициент ${actualFormatted})`;
-                    } else if (actual !== expected) {
-                        coeffText = ` (применённый коэффициент ${actualFormatted}, ожидаемый коэффициент ${expectedFormatted})`;
-                    }
+                    line += ` (применённый коэффициент ${actualFormatted})`;
                 }
-                let line = `${i+1}. Шифр: ${code} (позиция ${position})${coeffText}`;
-                if (special && special.text) {
-                    line = `${i+1}. Шифр: ${code} (позиция ${position})`;
-                    line += `\n    ${special.text}`;
-                } else {
-                    let dbDesc = item.dbDescription || '';
-                    if (!dbDesc) {
-                        const fullDesc = item.description || '';
-                        dbDesc = fullDesc.split('\n')[0];
-                        if (dbDesc.includes('⚠️') || dbDesc.includes('✅') || dbDesc.includes('ℹ️')) dbDesc = '';
-                    }
-                    if (dbDesc && dbDesc.length > 0 && dbDesc !== '—') {
-                        let cleanDesc = dbDesc.replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ').trim();
-                        cleanDesc = cleanDesc.replace(/^[⚠️✅ℹ️❌📝]\s*/, '');
-                        if (cleanDesc) line += `\n    ${cleanDesc}`;
-                    }
-                }
+                
                 text += line + '\n';
+                
+                const special = getSpecialCodeText(code, position, actual);
+                
+                if (special && special.text) {
+                    text += `    ${special.text}\n`;
+                } else {
+                    const shouldShow = shouldShowDescription(item);
+                    
+                    if (shouldShow) {
+                        let dbDescription = item.dbDescription || item.description || '';
+                        let cleanDesc = dbDescription.replace(/^[⚠️✅ℹ️❌📝]\s*/, '').replace(/\s+/g, ' ').trim();
+                        
+                        if (cleanDesc && cleanDesc !== '—' && cleanDesc !== '') {
+                            text += `    ${cleanDesc}\n`;
+                        }
+                    }
+                }
             }
             text += '\n';
         }
 
+        // ==================== БЛОК «Дополнительное замечание» ====================
         if (textLinesCount > 0) {
+            if (notAllowedCodes.length > 0 || warningCodes.length > 0) {
+                text += '\n';
+            }
             text += `Признак «Дополнительное замечание»
-Информация о включении в сметную документацию материальных ресурсов «по цене поставщика». В сметной документации обнаружено ${textLinesCount} позиций, сформированных «по цене поставщика».
-Заказчику необходимо дополнительно проверить в открытых источниках информацию об актуальной рыночной стоимости материальных ресурсов «по цене поставщика» (с учетом положений Распоряжения Правительства Москвы от 16.05.2014 № 242-РП «Об утверждении Методических рекомендаций по применению методов определения начальной (максимальной) цены контракта, цены контракта, заключаемого с единственным поставщиком (подрядчиком, исполнителем), начальной цены единицы товара, работы, услуги»).
-
-`;
+    Информация о включении в сметную документацию материальных ресурсов «по цене поставщика». В сметной документации обнаружено ${textLinesCount} позиций, сформированных «по цене поставщика»
+    Заказчику необходимо дополнительно проверить в открытых источниках информацию об актуальной рыночной стоимости материальных ресурсов «по цене поставщика» (с учетом положений Распоряжения Правительства Москвы от 16.05.2014 № 242-РП «Об утверждении Методических рекомендаций по применению методов определения начальной (максимальной) цены контракта, цены контракта, заключаемого с единственным поставщиком (подрядчиком, исполнителем), начальной цены единицы товара, работы, услуги»).
+    
+    `;
         }
 
         text += `В связи с вышеизложенным Учреждению необходимо:

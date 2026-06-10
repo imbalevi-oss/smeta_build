@@ -2252,3 +2252,11 @@ body {
     background: #eef2ff;
     border-left: 3px solid #667eea;
 }
+#copyLetterBtn {
+color:white;
+background: rgb(85, 22, 85);
+border-radius: 15px;
+padding: 5px;
+font-family:'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
+cursor: pointer;
+}

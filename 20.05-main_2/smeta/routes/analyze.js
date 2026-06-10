@@ -1,5 +1,6 @@
 // routes/analyze.js
-// Полностью переписанные маршруты для анализа смет и КС-2
+// Полностью переписанный маршрут для анализа смет и КС-2
+// С единой логикой проверки коэффициентов и пропуском некорректных строк
 
 const express = require('express');
 const multer = require('multer');
@@ -10,28 +11,20 @@ const logsDb = require('../../shareds/logs-db');
 const usersDb = require('../../shareds/users-db');
 const codesDb = require('../../shareds/codes-db');
 const { parseEstimate, extractCodeFromStrings } = require('../../shareds/estimate-parser');
-const { evaluateCoefficientAnalysis } = require('../../shareds/coefficient-analyzer');
+const { evaluateCoefficientAnalysis, encodeCoefficientMatch } = require('../../shareds/coefficient-analyzer');
 const router = express.Router();
-const iconv = require('iconv-lite');
 
-// ==================== ЕДИНАЯ ФУНКЦИЯ ДЛЯ СОХРАНЕНИЯ ОРИГИНАЛЬНЫХ ИМЁН ====================
+// ==================== ФУНКЦИИ ДЛЯ РАБОТЫ С ИМЕНАМИ ФАЙЛОВ ====================
 function saveWithOriginalName(file) {
     let originalName = file.originalname;
-    
-    // Если есть кракозябры - пробуем декодировать
     if (/[Ðà-ÿ]/i.test(originalName) && !/[а-яА-ЯёЁ]/.test(originalName)) {
         try {
             const buffer = Buffer.from(originalName, 'latin1');
             const decoded = buffer.toString('utf8');
-            if (/[а-яА-ЯёЁ]/.test(decoded)) {
-                originalName = decoded;
-            }
+            if (/[а-яА-ЯёЁ]/.test(decoded)) originalName = decoded;
         } catch(e) {}
     }
-    
-    // Замена опасных символов
     originalName = originalName.replace(/[<>:"|?*\\/]/g, '_');
-    
     const timestamp = Date.now();
     const ext = path.extname(originalName);
     const nameWithoutExt = path.basename(originalName, ext);
@@ -40,9 +33,7 @@ function saveWithOriginalName(file) {
 
 function getOriginalDisplayName(filename) {
     if (!filename) return '';
-    // Убираем timestamp из имени файла для отображения
     let name = path.basename(filename);
-    // Удаляем префикс вида 1234567890-
     name = name.replace(/^\d+-/, '');
     return name;
 }
@@ -61,7 +52,7 @@ function requireAuth(req, res, next) {
     next();
 }
 
-// ==================== НАСТРОЙКА ЗАГРУЗКИ ФАЙЛОВ ====================
+// ==================== НАСТРОЙКА ЗАГРУЗКИ ====================
 const uploadDir = path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -70,17 +61,63 @@ const storage = multer.diskStorage({
     filename: (req, file, cb) => cb(null, saveWithOriginalName(file))
 });
 
-const upload = multer({
-    storage,
-    limits: { fileSize: 20 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        if (['.xls', '.xlsx', '.xlsm'].includes(ext)) cb(null, true);
-        else cb(new Error('Разрешены только Excel файлы (.xls, .xlsx)'));
-    }
-});
+const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } });
 
-// ==================== АНАЛИЗ СМЕТЫ ====================
+// ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+
+/**
+ * Проверяет, является ли строка некорректной для анализа
+ * (пропускаем пустые, одиночные цифры, слишком короткие строки и т.д.)
+ */
+// routes/analyze.js
+
+/**
+ * Проверяет, является ли строка МУСОРНОЙ (некорректной) для анализа
+ * 
+ * ПРОПУСКАЕМ (игнорируем):
+ * - пустые строки
+ * - одиночные цифры: "1", "2", "3"
+ * - двузначные числа без спецсимволов: "11", "12", "23"
+ * - длинный текст (>50 символов) - описания, примечания, технические условия
+ * 
+ * АНАЛИЗИРУЕМ:
+ * - "цена поставщика" и подобные короткие текстовые строки
+ * - "2,1", "12,1", "55,1" (номера позиций с запятыми)
+ * - любые строки, похожие на шифры (с точками, дефисами)
+ * - короткие текстовые строки (до 50 символов) с буквами
+ */
+function isInvalidCodeString(str) {
+    if (!str || typeof str !== 'string') return true;
+    const trimmed = str.trim();
+    
+    // Пустые строки
+    if (trimmed === '') return true;
+    
+    // ========== ПРОПУСКАЕМ ==========
+    // Длинный текст (>50 символов) - не может быть шифром и не цена поставщика
+    if (trimmed.length > 50) return true;
+    if (trimmed === '9999990001') return true;
+    // Одиночные цифры: "1", "2", "3", "4", "5", "6", "7", "8", "9"
+    if (/^\d$/.test(trimmed)) return true;
+    
+    // Двузначные числа без спецсимволов: "11", "12", "23", "45"
+    if (/^\d{2}$/.test(trimmed)) return true;
+    
+    // Трёхзначные числа без спецсимволов: "123", "456" (часто ошибочные данные)
+    if (/^\d{3}$/.test(trimmed)) return true;
+    
+    // Строки, состоящие только из цифр и запятых (например, "1,2,3") - не код
+    if (/^[\d,]+$/.test(trimmed) && trimmed.length < 10) {
+        // Если короткая строка из цифр и запятых - скорее всего, номера позиций
+        // Но такие как "2,1" - это может быть номер позиции, анализируем
+        // А "123456" - пропускаем
+        if (!trimmed.includes(',')) return true;
+    }
+    
+    // ВСЁ ОСТАЛЬНОЕ анализируем
+    return false;
+}
+
 // ==================== АНАЛИЗ СМЕТЫ ====================
 router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
     upload.single('file')(req, res, async (err) => {
@@ -96,13 +133,9 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
         try {
             console.log(`\n========== АНАЛИЗ СМЕТЫ ==========`);
             console.log(`Файл: ${displayName}`);
-            console.log(`Проект ID: ${projectId}`);
 
             const parseResult = parseEstimate(fileBuffer, displayName);
-            
-            if (!parseResult.success) {
-                throw new Error(`Ошибка парсинга: ${parseResult.error}`);
-            }
+            if (!parseResult.success) throw new Error(`Ошибка парсинга: ${parseResult.error}`);
 
             const parsedPositions = parseResult.items;
             console.log(`Парсинг завершён. Найдено позиций: ${parsedPositions.length}`);
@@ -111,24 +144,28 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
             const analyzedPositions = [];
             let textCount = 0, warningCount = 0, notAllowedCount = 0, notFoundCount = 0, foundCount = 0;
             let coefficientMatches = 0, coefficientMismatches = 0;
+            let skippedCount = 0;
+            const skippedExamples = [];
 
             for (const pos of parsedPositions) {
                 const positionNumber = pos.positionNumber;
                 const codeRaw = pos.code;
-                const totalAmount = pos.totalAmount;
                 
-                // НОРМАЛИЗАЦИЯ КОЭФФИЦИЕНТА СМЕТЫ
-                let actualCoefficient = pos.coefficient;
-                console.log(`[analyze] Позиция ${positionNumber}: оригинальный коэффициент = ${actualCoefficient}`);
-                
-                if (actualCoefficient !== null && actualCoefficient !== undefined && actualCoefficient !== 1) {
-                    const original = actualCoefficient;
-                    actualCoefficient = Math.round(actualCoefficient * 100) / 100;
-                    if (original !== actualCoefficient) {
-                        console.log(`[analyze] Позиция ${positionNumber}: нормализация ${original} -> ${actualCoefficient}`);
+                // ========== ПРОПУСК НЕКОРРЕКТНЫХ СТРОК ==========
+                if (isInvalidCodeString(codeRaw)) {
+                    skippedCount++;
+                    if (skippedExamples.length < 10) {
+                        skippedExamples.push({ positionNumber, code: codeRaw });
                     }
+                    console.log(`[analyze] Пропущена некорректная строка шифра: "${codeRaw}" (позиция ${positionNumber})`);
+                    continue;
                 }
                 
+                const totalAmount = pos.totalAmount;
+                const actualCoefficientRaw = pos.coefficient;
+                let actualCoefficient = actualCoefficientRaw !== null && actualCoefficientRaw !== undefined
+                    ? Math.round(actualCoefficientRaw * 100) / 100
+                    : null;
                 const quantity = pos.quantity;
                 const unit = pos.unit;
                 const name = pos.name;
@@ -137,16 +174,17 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 const price = pos.price;
 
                 const { code: extractedCode } = extractCodeFromStrings(codeRaw);
-                const isTextPosition = pos.isTextPosition || (!extractedCode && codeRaw && codeRaw.length > 0 && !/^\d/.test(codeRaw));
+                const isTextPosition = pos.isTextPosition || (!extractedCode && codeRaw && codeRaw.length > 0);
 
+                // ========== ТЕКСТОВАЯ СТРОКА (ЦЕНА ПОСТАВЩИКА) ==========
                 if (isTextPosition) {
                     textCount++;
                     analyzedPositions.push({
                         positionNumber: positionNumber,
                         code: codeRaw,
-                        extractedCode: extractedCode,
+                        extractedCode: null,
                         name: name,
-                        original_name: name, 
+                        original_name: name,
                         status: 'Обратите внимание',
                         statusCategory: 'text',
                         matchType: 'text',
@@ -178,6 +216,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                     continue;
                 }
 
+                // ========== НЕ УДАЛОСЬ ИЗВЛЕЧЬ КОД ==========
                 if (!extractedCode) {
                     notFoundCount++;
                     analyzedPositions.push({
@@ -186,7 +225,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                         extractedCode: null,
                         name: name,
                         status: 'НЕ НАЙДЕН',
-                        statusCategory: 'notfound',
+                        statusCategory: 'warning',
                         matchType: 'none',
                         description: 'Не удалось извлечь код из строки',
                         totalAmount: totalAmount,
@@ -214,126 +253,46 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                     continue;
                 }
 
+                // ========== ПОИСК КОДА В БД ==========
                 const found = await codesDb.findHierarchicalMatch(extractedCode, sessionCodeCache);
-                let status = 'Доступен';
-                let description = '';
-                let matchType = 'none';
-                let expectedCoefficient = null;
-                let coefficientMatch = null;
-                let category = 'ok';
-                let isRestoration = false;
+                if (found) foundCount++;
+                
+                // Единая логика анализа коэффициента
+                const analysis = evaluateCoefficientAnalysis({
+                    actualCoefficient: actualCoefficient,
+                    expectedCoefficient: found?.coefficient_value,  // ← ЭТО ВАЖНО! Передаём коэффициент из БД
+                    isRestoration: (found?.matchType === 'restoration'),
+                    found: !!found,
+                    baseStatus: found?.status || 'Доступен',
+                    baseDescription: found?.description || ''
+                });
+                
 
-                if (found) {
-                    foundCount++;
-                    status = found.status || 'Доступен';
-                    description = found.description || '';
-                    matchType = found.matchType;
-                    isRestoration = (found.matchType === 'restoration');
-                    expectedCoefficient = found.coefficient_value;
-                    
-                    // НОРМАЛИЗАЦИЯ ОЖИДАЕМОГО КОЭФФИЦИЕНТА ИЗ БД
-                    if (expectedCoefficient !== null && expectedCoefficient !== undefined && expectedCoefficient !== 1) {
-                        expectedCoefficient = Math.round(expectedCoefficient * 100) / 100;
-                        console.log(`[analyze] Позиция ${positionNumber}: ожидаемый коэффициент из БД = ${expectedCoefficient}`);
-                    }
-                }
+                if (analysis.coefficientMatch === true) coefficientMatches++;
+                if (analysis.coefficientMatch === false) coefficientMismatches++;
+                if (analysis.statusCategory === 'warning') warningCount++;
+                if (analysis.statusCategory === 'notallowed') notAllowedCount++;
+                if (!found && analysis.statusCategory !== 'text') notFoundCount++;
 
-                const actual = actualCoefficient !== null ? parseFloat(actualCoefficient) : null;
-                const expected = expectedCoefficient ? parseFloat(expectedCoefficient) : null;
-                const TOLERANCE = 0.01;
-
-                console.log(`[analyze] Позиция ${positionNumber}: actual=${actual}, expected=${expected}`);
-
-                if (actual !== null) {
-                    if (actual < 1) {
-                        category = 'ok';
-                        status = 'Доступен';
-                        coefficientMatch = null;
-                        description = `📉 Понижающий коэффициент: ${actual.toFixed(2)} (допустимо)`;
-                        if (expected && expected > 1 && actual < expected) {
-                            description += `, ожидался ${expected.toFixed(2)}`;
-                        }
-                        console.log(`[analyze] Позиция ${positionNumber}: понижающий коэффициент ${actual}`);
-                    } 
-                    else if (actual === 1) {
-                        if (expected && expected !== 1) {
-                            category = 'warning';
-                            status = 'Обратите внимание';
-                            coefficientMatch = false;
-                            description = `⚠️ Отсутствует обязательный коэффициент. Ожидается ${expected.toFixed(2)}.`;
-                            coefficientMismatches++;
-                            console.log(`[analyze] Позиция ${positionNumber}: ОТСУТСТВУЕТ обязательный коэффициент ${expected}`);
-                        } else {
-                            description = `✅ Коэффициент 1 (норма)`;
-                        }
-                    } 
-                    else {
-                        if (expected && expected !== 1) {
-                            if (actual > expected + TOLERANCE) {
-                                category = 'warning';
-                                status = 'Обратите внимание';
-                                coefficientMatch = false;
-                                description = `⚠️ Коэффициент ${actual.toFixed(2)} превышает допустимый (${expected.toFixed(2)}).`;
-                                coefficientMismatches++;
-                                console.log(`[analyze] Позиция ${positionNumber}: ПРЕВЫШЕНИЕ ${actual} > ${expected}`);
-                            } else if (Math.abs(actual - expected) <= TOLERANCE) {
-                                coefficientMatch = true;
-                                description = `✅ Коэффициент ${actual.toFixed(2)} соответствует норме (${expected.toFixed(2)})`;
-                                coefficientMatches++;
-                                console.log(`[analyze] Позиция ${positionNumber}: СОВПАДЕНИЕ ${actual} = ${expected}`);
-                            } else {
-                                coefficientMatch = null;
-                                description = `ℹ️ Коэффициент ${actual.toFixed(2)} ниже ожидаемого (${expected.toFixed(2)}), но допустим.`;
-                                console.log(`[analyze] Позиция ${positionNumber}: НИЖЕ ${actual} < ${expected}`);
-                            }
-                        } else {
-                            category = 'warning';
-                            status = 'Обратите внимание';
-                            coefficientMatch = false;
-                            description = `⚠️ Коэффициент ${actual.toFixed(2)} больше 1. Требуется обоснование.`;
-                            coefficientMismatches++;
-                            console.log(`[analyze] Позиция ${positionNumber}: КОЭФФИЦИЕНТ >1 без нормы ${actual}`);
-                        }
-                    }
-                } else if (expected && expected !== 1) {
-                    category = 'warning';
-                    status = 'Обратите внимание';
-                    coefficientMatch = false;
-                    description = `⚠️ Отсутствует обязательный коэффициент. Ожидается ${expected.toFixed(2)}.`;
-                    coefficientMismatches++;
-                    console.log(`[analyze] Позиция ${positionNumber}: КОЭФФИЦИЕНТ ОТСУТСТВУЕТ, ожидается ${expected}`);
-                }
-
-                if (isRestoration) {
-                    category = 'notallowed';
-                    status = 'Нельзя применять';
-                    description = '🏛️ Реставрационные работы (отделы 51-59). Применение запрещено.';
-                    coefficientMatch = null;
-                    console.log(`[analyze] Позиция ${positionNumber}: РЕСТАВРАЦИОННЫЙ КОД`);
-                }
-
-                if (category === 'warning') warningCount++;
-                if (category === 'notallowed') notAllowedCount++;
-                if (!found && category !== 'text') notFoundCount++;
-
+                // ========== ФОРМИРОВАНИЕ РЕЗУЛЬТАТА ==========
                 analyzedPositions.push({
                     positionNumber: positionNumber,
                     code: codeRaw,
                     extractedCode: extractedCode,
                     name: name,
-                    status: status,
-                    statusCategory: category,
-                    matchType: matchType,
-                    description: description,
+                    status: analysis.status,
+                    statusCategory: analysis.statusCategory,
+                    matchType: found?.matchType || 'none',
+                    description: analysis.description,
                     totalAmount: totalAmount,
                     quantity: quantity,
                     unit: unit,
                     price: price,
                     actualCoefficient: actualCoefficient,
-                    expectedCoefficient: expectedCoefficient,
-                    coefficientMatch: coefficientMatch,
+                    expectedCoefficient: analysis.expectedCoefficient,
+                    coefficientMatch: analysis.coefficientMatch,
                     isText: false,
-                    isRestoration: isRestoration,
+                    isRestoration: (found?.matchType === 'restoration'),
                     hasDetails: (pos.details && pos.details.length > 0) || false,
                     details: pos.details || [],
                     mrDetails: pos.mrDetails || [],
@@ -344,25 +303,30 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                     isDuplicate: false,
                     duplicateCount: 0,
                     hasCoefficient: (actualCoefficient !== null && actualCoefficient !== 1),
-                    coefficientType: 'none',
+                    coefficientType: found?.coefficient_type || 'none',
                     rowNumber: pos.rowNumber,
                     fileName: displayName,
                     positionName: name
                 });
             }
 
-            // ВЫВОД СТАТИСТИКИ ПО КОЭФФИЦИЕНТАМ
-            console.log(`\n========== СТАТИСТИКА КОЭФФИЦИЕНТОВ ==========`);
-            console.log(`Всего позиций: ${analyzedPositions.length}`);
-            console.log(`С коэффициентами: ${analyzedPositions.filter(p => p.hasCoefficient).length}`);
+            // ========== ВЫВОД СТАТИСТИКИ ==========
+            console.log(`\n========== СТАТИСТИКА АНАЛИЗА ==========`);
+            console.log(`Всего позиций в файле: ${parsedPositions.length}`);
+            console.log(`Проанализировано: ${analyzedPositions.length}`);
+            console.log(`Пропущено (некорректные строки): ${skippedCount}`);
+            console.log(`Найдено кодов: ${foundCount}`);
+            console.log(`Не найдено: ${notFoundCount}`);
+            console.log(`Предупреждений (коэффициенты): ${warningCount}`);
+            console.log(`Запрещено (реставрация): ${notAllowedCount}`);
+            console.log(`Текстовых строк (цена поставщика): ${textCount}`);
             console.log(`Коэффициенты совпадают: ${coefficientMatches}`);
             console.log(`Коэффициенты НЕ совпадают: ${coefficientMismatches}`);
-            console.log(`Предупреждений: ${warningCount}`);
-            console.log(`Запрещено: ${notAllowedCount}`);
-            console.log(`=============================================\n`);
+            if (skippedExamples.length > 0) {
+                console.log(`Примеры пропущенных строк:`, skippedExamples);
+            }
 
-            // ... остальной код без изменений (создание сессии, сохранение в БД, ответ)
-            
+            // ========== СОХРАНЕНИЕ СЕССИИ ==========
             const totalMrAmount = parsedPositions.reduce((sum, p) => sum + (p.mrTotalAmount || 0), 0);
             const totalMrRows = parsedPositions.reduce((sum, p) => sum + (p.mrDetails?.length || 0), 0);
             const positionsWithMr = parsedPositions.filter(p => (p.mrDetails?.length || 0) > 0).length;
@@ -370,7 +334,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
             const user = await usersDb.getUserById(userId);
             const sessionId = Date.now() + '-' + Math.random().toString(36).substr(2, 8);
             const estimateName = parseResult.sheetName || 'Смета';
-            
+
             await logsDb.createSession(sessionId, {
                 user: { fullname: user.fullname, institution: user.institution },
                 ip: req.ip,
@@ -384,22 +348,19 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 totalMrAmount,
                 totalMrRows,
                 positionsWithMr,
+                coefficientMatches,
+                coefficientMismatches,
                 status: 'completed',
                 project_id: projectId
             });
-            
+
             await logsDb.addCodeDetailsBatch(sessionId, analyzedPositions);
 
             if (projectId) {
-                await logsDb.updateProjectSession(
-                    projectId,
-                    userId,
-                    sessionId,
-                    estimateName,
-                    displayName
-                );
+                await logsDb.updateProjectSession(projectId, userId, sessionId, estimateName, displayName);
             }
 
+            // ========== ОТВЕТ ==========
             res.json({
                 success: true,
                 sessionId,
@@ -408,13 +369,16 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
                 totalMrAmount,
                 totalAmountFormatted: parseResult.totalAmountFormatted,
                 stats: {
-                    totalPositions: analyzedPositions.length,
+                    totalPositions: parsedPositions.length,
+                    analyzedPositions: analyzedPositions.length,
+                    skippedCount: skippedCount,
                     foundCount, notFoundCount, warningCount, notAllowedCount, textCount,
                     coefficientMatches, coefficientMismatches,
                     totalMrAmount, totalMrRows, positionsWithMr
                 },
                 positions: analyzedPositions,
-                detectedColumns: parseResult.detectedColumns
+                detectedColumns: parseResult.detectedColumns,
+                skippedExamples: skippedExamples
             });
 
         } catch (error) {
@@ -426,6 +390,7 @@ router.post('/detailed-analyze-unified', requireAuth, (req, res) => {
     });
 });
 
+// ==================== АНАЛИЗ КС-2 ====================
 async function enrichKs2Items(items) {
     const sessionCodeCache = new Map();
     let coefficientMatches = 0;
@@ -437,6 +402,24 @@ async function enrichKs2Items(items) {
 
     for (const item of items) {
         const extractedCode = item.code || null;
+        
+        // Пропускаем некорректные коды
+        if (isInvalidCodeString(extractedCode)) {
+            enriched.push({
+                ...item,
+                details: Array.isArray(item.details) ? item.details : [],
+                extractedCode: null,
+                matchType: 'invalid',
+                status: 'Обратите внимание',
+                statusCategory: 'warning',
+                description: '⚠️ Некорректное значение в колонке шифра',
+                coefficientMatch: null,
+                expectedCoefficient: null,
+                hasDetails: Array.isArray(item.details) && item.details.length > 0
+            });
+            continue;
+        }
+        
         const found = extractedCode
             ? await codesDb.findHierarchicalMatch(extractedCode, sessionCodeCache)
             : null;
@@ -478,7 +461,6 @@ async function enrichKs2Items(items) {
     };
 }
 
-// ==================== АНАЛИЗ КС-2 ====================
 router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (req, res) => {
     const ks2Files = req.files || [];
     if (!ks2Files.length) return res.status(400).json({ error: 'Не загружены файлы КС-2' });
@@ -489,8 +471,6 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
     try {
         const user = await usersDb.getUserById(userId);
         if (!user) return res.status(401).json({ error: 'Пользователь не найден' });
-
-  
 
         const allResults = [];
         let totalItems = 0;
@@ -506,15 +486,10 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
             try {
                 const fileBuffer = fs.readFileSync(filePath);
                 const parseResult = parseKS2(fileBuffer, displayName);
-
                 if (!parseResult.success) {
-                    
                     allResults.push({ fileName: displayName, error: parseResult.error, success: false });
                     continue;
                 }
-
-                
-                
 
                 const sessionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 8);
                 sessionIds.push(sessionId);
@@ -545,13 +520,7 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
                 totalAmount += parseResult.totalAmount;
 
                 if (projectId) {
-                    await logsDb.updateProjectSession(
-                        projectId,
-                        userId,
-                        sessionId,
-                        estimateName,
-                        displayName
-                    );
+                    await logsDb.updateProjectSession(projectId, userId, sessionId, estimateName, displayName);
                 }
 
                 allResults.push({
@@ -573,14 +542,12 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
                 });
 
             } catch (err) {
-               
+                console.error(`[analyze-ks2] Ошибка обработки ${displayName}:`, err);
                 allResults.push({ fileName: displayName, error: err.message, success: false });
             } finally {
                 try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch(e) {}
             }
         }
-
-      
 
         res.json({
             success: true,
@@ -594,7 +561,7 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
         });
 
     } catch (error) {
-        
+        console.error('[analyze-ks2] Ошибка:', error);
         res.status(500).json({ error: error.message, success: false });
     } finally {
         for (const file of ks2Files) {
@@ -607,21 +574,10 @@ router.post('/analyze-ks2', requireAuth, upload.array('ks2Files', 10), async (re
 router.get('/ks2-sessions/:sessionId', async (req, res) => {
     try {
         const { sessionId } = req.params;
-        
-     
-        
-        if (!sessionId) {
-            return res.status(400).json({ error: 'sessionId обязателен' });
-        }
+        if (!sessionId) return res.status(400).json({ error: 'sessionId обязателен' });
         
         const session = await logsDb.getOne(`SELECT * FROM sessions WHERE session_id = @p0`, [sessionId]);
-        
-        if (!session) {
-       
-            return res.status(404).json({ error: 'Сессия не найдена' });
-        }
-        
-        
+        if (!session) return res.status(404).json({ error: 'Сессия не найдена' });
         
         const items = await logsDb.getKs2Items(sessionId);
         const totalAmount = session.total_amount || items.reduce((sum, i) => sum + (i.total || 0), 0);
@@ -644,9 +600,8 @@ router.get('/ks2-sessions/:sessionId', async (req, res) => {
             totalItems: items.length,
             totalAmount
         });
-        
     } catch (error) {
-
+        console.error('[ks2-sessions] Ошибка:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -656,7 +611,7 @@ router.post('/export-ks2-excel', requireAuth, async (req, res) => {
     try {
         const { items, fileName } = req.body;
         if (!items || items.length === 0) return res.status(400).json({ error: 'Нет данных для экспорта' });
-
+        
         const XLSX = require('xlsx');
         const excelData = items.map((item, idx) => ({
             '№ п/п': idx + 1,
@@ -669,6 +624,7 @@ router.post('/export-ks2-excel', requireAuth, async (req, res) => {
             'Объём': item.volume || '',
             'Сумма, ₽': (item.total || 0).toFixed(2)
         }));
+        
         const totalAmount = items.reduce((sum, i) => sum + (i.total || 0), 0);
         excelData.push({
             '№ п/п': '',
@@ -681,16 +637,22 @@ router.post('/export-ks2-excel', requireAuth, async (req, res) => {
             'Объём': '',
             'Сумма, ₽': totalAmount.toFixed(2)
         });
+        
         const worksheet = XLSX.utils.json_to_sheet(excelData);
-        worksheet['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 50 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
+        worksheet['!cols'] = [
+            { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, 
+            { wch: 50 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 }
+        ];
+        
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, 'КС-2');
         const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName || 'ks2_export'}.xlsx"`);
         res.send(buffer);
     } catch (error) {
-    
+        console.error('[export-ks2] Ошибка:', error);
         res.status(500).json({ error: error.message });
     }
 });
