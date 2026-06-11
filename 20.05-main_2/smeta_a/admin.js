@@ -2686,6 +2686,19 @@ function switchTab(tab) {
         case 'exactCodes':
             loadExactCodes();
             break;
+            case 'executiveDashboard':
+    // Загружаем iframe с executive-dashboard.html
+    const executiveFrame = document.getElementById('executiveDashboardFrame');
+    if (!executiveFrame) {
+        const frame = document.createElement('iframe');
+        frame.id = 'executiveDashboardFrame';
+        frame.src = '/executive-dashboard.html';
+        frame.style.width = '100%';
+        frame.style.height = 'calc(100vh - 120px)';
+        frame.style.border = 'none';
+        document.getElementById('executiveDashboardTab').appendChild(frame);
+    }
+    break;
         case 'parentCodes':
             loadParentCodes();
             break;

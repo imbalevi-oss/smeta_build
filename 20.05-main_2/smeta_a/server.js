@@ -997,7 +997,109 @@ app.get('/api/logs/sessions/:sessionId', async (req, res) => {
         res.status(500).json({ error: 'Ошибка загрузки деталей сессии' });
     }
 });
+// server.js - добавить новые маршруты
 
+// ==================== EXECUTIVE DASHBOARD API ====================
+
+/**
+ * GET /api/executive/top-users
+ * Топ пользователей с расширенной статистикой
+ */
+app.get('/api/executive/top-users', async (req, res) => {
+    try {
+        const { days = 30, limit = 20, sortBy = 'accuracy' } = req.query;
+        
+        const users = await logsDb.getTopUsersWithStats(parseInt(days), parseInt(limit), sortBy);
+        
+        // Добавляем рейтинг и тренд
+        const maxSessions = Math.max(...users.map(u => u.sessions_count), 1);
+        const maxAccuracy = Math.max(...users.map(u => u.avg_accuracy), 1);
+        
+        const enriched = users.map(user => ({
+            ...user,
+            rating: Math.round(
+                (user.avg_accuracy / maxAccuracy) * 50 +
+                (user.sessions_count / maxSessions) * 30 +
+                (1 - (user.coefficient_mismatches / (user.coefficient_matches + 1)) / 10) * 20
+            ),
+            trend: user.accuracy_trend || 0
+        }));
+        
+        res.json({ success: true, users: enriched });
+    } catch (err) {
+        console.error('Error fetching top users:', err);
+        res.status(500).json({ error: 'Ошибка загрузки пользователей' });
+    }
+});
+
+/**
+ * GET /api/executive/top-errors
+ * Топ ошибок с группировкой по проектам
+ */
+app.get('/api/executive/top-errors', async (req, res) => {
+    try {
+        const { days = 30, limit = 50, status = 'all' } = req.query;
+        
+        const errors = await logsDb.getTopErrorsWithProjects(parseInt(days), parseInt(limit), status);
+        
+        res.json({ success: true, errors });
+    } catch (err) {
+        console.error('Error fetching top errors:', err);
+        res.status(500).json({ error: 'Ошибка загрузки ошибок' });
+    }
+});
+
+/**
+ * GET /api/executive/user-projects/:userId
+ * Проекты конкретного пользователя с проблемами
+ */
+app.get('/api/executive/user-projects/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { days = 90 } = req.query;
+        
+        const projects = await logsDb.getUserProjectsWithProblems(parseInt(userId), parseInt(days));
+        
+        res.json({ success: true, projects });
+    } catch (err) {
+        console.error('Error fetching user projects:', err);
+        res.status(500).json({ error: 'Ошибка загрузки проектов' });
+    }
+});
+
+/**
+ * GET /api/executive/error-details/:errorId
+ * Детали конкретной ошибки (код, проекты, сметы)
+ */
+app.get('/api/executive/error-details/:errorId', async (req, res) => {
+    try {
+        const { errorId } = req.params;
+        
+        const details = await logsDb.getErrorDetails(errorId);
+        
+        res.json({ success: true, ...details });
+    } catch (err) {
+        console.error('Error fetching error details:', err);
+        res.status(500).json({ error: 'Ошибка загрузки деталей' });
+    }
+});
+
+/**
+ * GET /api/executive/error-tree
+ * Древо проблем по иерархии кодов
+ */
+app.get('/api/executive/error-tree', async (req, res) => {
+    try {
+        const { days = 30 } = req.query;
+        
+        const tree = await logsDb.getErrorHierarchyTree(parseInt(days));
+        
+        res.json({ success: true, tree });
+    } catch (err) {
+        console.error('Error fetching error tree:', err);
+        res.status(500).json({ error: 'Ошибка загрузки дерева ошибок' });
+    }
+});
 app.get('/api/logs/match-types', async (req, res) => {
     try {
         const days = parseInt(req.query.days) || 30;

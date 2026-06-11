@@ -1175,7 +1175,267 @@ async function getUsersAnalytics(days = 30, projectId = null) {
 
     return await query(sql, params);
 }
+// shareds/logs-db.js - добавить методы
 
+/**
+ * Топ пользователей с расширенной статистикой и трендом
+ */
+async function getTopUsersWithStats(days, limit, sortBy = 'accuracy') {
+    const dateFilter = `s.created_at >= DATEADD(day, -@p0, DATEADD(hour, 3, GETUTCDATE()))`;
+    
+    // Основная статистика
+    const users = await query(`
+        SELECT TOP (@p1)
+            u.id as user_id,
+            u.fullname as user_name,
+            u.institution as user_institution,
+            u.username as login,
+            COUNT(DISTINCT s.session_id) as sessions_count,
+            COUNT(DISTINCT s.filename) as files_count,
+            SUM(s.total_codes) as total_codes,
+            SUM(s.found_codes) as found_codes,
+            CASE WHEN SUM(s.total_codes) > 0 
+                 THEN ROUND(SUM(s.found_codes)*100.0/SUM(s.total_codes), 1) 
+                 ELSE 0 END as avg_accuracy,
+            SUM(s.coefficient_matches) as coeff_matches,
+            SUM(s.coefficient_mismatches) as coeff_mismatches,
+            SUM(s.not_found_codes) as not_found_codes,
+            SUM(s.restoration_codes) as restoration_codes,
+            SUM(s.total_amount) as total_amount,
+            MAX(s.created_at) as last_activity,
+            SUM(CASE WHEN s.status = 'error' THEN 1 ELSE 0 END) as error_sessions
+        FROM sessions s
+        LEFT JOIN users u ON s.user_name = u.fullname
+        WHERE ${dateFilter}
+          AND s.user_name IS NOT NULL AND s.user_name != ''
+          AND s.status = 'completed'
+        GROUP BY u.id, u.fullname, u.institution, u.username
+        ORDER BY 
+            CASE WHEN @p2 = 'accuracy' THEN ROUND(SUM(s.found_codes)*100.0/SUM(s.total_codes), 1) END DESC,
+            CASE WHEN @p2 = 'sessions' THEN COUNT(DISTINCT s.session_id) END DESC,
+            CASE WHEN @p2 = 'amount' THEN SUM(s.total_amount) END DESC
+    `, [days, limit, sortBy]);
+    
+    // Добавляем тренд точности за последние 7 дней
+    for (const user of users) {
+        const trend = await getOne(`
+            SELECT 
+                AVG(CASE WHEN total_codes > 0 THEN (found_codes * 100.0 / total_codes) ELSE 0 END) as week_accuracy,
+                LAG(AVG(CASE WHEN total_codes > 0 THEN (found_codes * 100.0 / total_codes) ELSE 0 END), 7) OVER (ORDER BY created_at) as prev_week_accuracy
+            FROM sessions
+            WHERE user_name = @p0
+              AND created_at >= DATEADD(day, -14, DATEADD(hour, 3, GETUTCDATE()))
+            GROUP BY CAST(created_at AS DATE)
+        `, [user.user_name]);
+        
+        if (trend) {
+            user.accuracy_trend = trend.week_accuracy - (trend.prev_week_accuracy || trend.week_accuracy);
+        } else {
+            user.accuracy_trend = 0;
+        }
+    }
+    
+    return users;
+}
+
+/**
+ * Топ ошибок с группировкой по проектам
+ */
+async function getTopErrorsWithProjects(days, limit, status = 'all') {
+    const dateFilter = `s.created_at >= DATEADD(day, -@p0, DATEADD(hour, 3, GETUTCDATE()))`;
+    const statusFilter = status !== 'all' ? `AND cd.status = @p2` : '';
+    const params = [days];
+    if (status !== 'all') params.push(status);
+    params.push(limit);
+    
+    const errors = await query(`
+        SELECT TOP (@p${params.length - 1})
+            cd.code,
+            cd.description,
+            cd.status,
+            cd.match_type,
+            cd.is_restoration,
+            cd.has_coefficient,
+            cd.coefficient_value,
+            cd.expected_coefficient,
+            COUNT(*) as occurrence_count,
+            COUNT(DISTINCT s.session_id) as sessions_count,
+            COUNT(DISTINCT s.project_id) as projects_count,
+            SUM(s.total_amount) as total_amount_affected,
+            STRING_AGG(DISTINCT CAST(s.project_id AS NVARCHAR(10)), ',') as project_ids,
+            STRING_AGG(DISTINCT s.filename, ' | ') as example_filenames,
+            MAX(s.created_at) as last_seen,
+            MIN(s.created_at) as first_seen
+        FROM code_details cd
+        JOIN sessions s ON cd.session_id = s.session_id
+        WHERE ${dateFilter}
+          AND (cd.status IN (N'Нельзя применять', N'Обратите внимание') OR cd.is_restoration = 1)
+          ${statusFilter}
+        GROUP BY cd.code, cd.description, cd.status, cd.match_type, cd.is_restoration,
+                 cd.has_coefficient, cd.coefficient_value, cd.expected_coefficient
+        ORDER BY occurrence_count DESC
+    `, params);
+    
+    // Для каждой ошибки получаем проекты с деталями
+    for (const error of errors) {
+        if (error.project_ids) {
+            const projectIds = error.project_ids.split(',').map(id => parseInt(id)).filter(id => !isNaN(id));
+            if (projectIds.length > 0) {
+                const placeholders = projectIds.map((_, i) => `@p${i}`).join(',');
+                error.projects = await query(`
+                    SELECT 
+                        p.id,
+                        p.project_name,
+                        p.status,
+                        p.user_id,
+                        u.fullname as user_name,
+                        u.institution as user_institution,
+                        (
+                            SELECT COUNT(*) 
+                            FROM sessions s2 
+                            WHERE s2.project_id = p.id 
+                              AND s2.created_at >= DATEADD(day, -30, DATEADD(hour, 3, GETUTCDATE()))
+                        ) as recent_sessions_count
+                    FROM user_projects p
+                    LEFT JOIN users u ON p.user_id = u.id
+                    WHERE p.id IN (${placeholders})
+                `, projectIds);
+            }
+        }
+    }
+    
+    return errors;
+}
+
+/**
+ * Проекты пользователя с проблемами
+ */
+async function getUserProjectsWithProblems(userId, days = 90) {
+    const projects = await query(`
+        SELECT 
+            p.id,
+            p.project_name,
+            p.status,
+            p.created_at,
+            p.updated_at,
+            COUNT(DISTINCT s.session_id) as sessions_count,
+            SUM(s.total_codes) as total_codes,
+            SUM(s.found_codes) as found_codes,
+            SUM(s.coefficient_mismatches) as coefficient_errors,
+            SUM(s.restoration_codes) as restoration_errors,
+            SUM(s.not_found_codes) as not_found_errors,
+            SUM(CASE WHEN cd.status = N'Нельзя применять' THEN 1 ELSE 0 END) as forbidden_errors,
+            SUM(CASE WHEN cd.status = N'Обратите внимание' THEN 1 ELSE 0 END) as warning_errors,
+            STRING_AGG(DISTINCT cd.code, ', ') as problem_codes_sample
+        FROM user_projects p
+        LEFT JOIN sessions s ON p.id = s.project_id
+        LEFT JOIN code_details cd ON s.session_id = cd.session_id
+        WHERE p.user_id = @p0
+          AND (cd.status IN (N'Нельзя применять', N'Обратите внимание') OR cd.is_restoration = 1 OR cd.coefficient_match = -1)
+          AND s.created_at >= DATEADD(day, -@p1, DATEADD(hour, 3, GETUTCDATE()))
+        GROUP BY p.id, p.project_name, p.status, p.created_at, p.updated_at
+        ORDER BY (SUM(cd.coefficient_mismatches) + SUM(cd.restoration_codes) + SUM(cd.not_found_codes)) DESC
+    `, [userId, days]);
+    
+    return projects;
+}
+
+/**
+ * Детали ошибки (все вхождения по проектам и сметам)
+ */
+async function getErrorDetails(errorCode) {
+    const sessions = await query(`
+        SELECT 
+            s.session_id,
+            s.filename,
+            s.estimate_name,
+            s.created_at,
+            s.user_name,
+            s.project_id,
+            p.project_name,
+            cd.position,
+            cd.row_number,
+            cd.coefficient_value,
+            cd.expected_coefficient,
+            cd.coefficient_match,
+            cd.description as code_description
+        FROM code_details cd
+        JOIN sessions s ON cd.session_id = s.session_id
+        LEFT JOIN user_projects p ON s.project_id = p.id
+        WHERE cd.code = @p0
+          AND (cd.status IN (N'Нельзя применять', N'Обратите внимание') OR cd.is_restoration = 1)
+        ORDER BY s.created_at DESC
+    `, [errorCode]);
+    
+    const stats = {
+        total_occurrences: sessions.length,
+        unique_projects: new Set(sessions.map(s => s.project_id).filter(Boolean)).size,
+        unique_users: new Set(sessions.map(s => s.user_name)).size,
+        first_seen: sessions[sessions.length - 1]?.created_at,
+        last_seen: sessions[0]?.created_at
+    };
+    
+    return { code: errorCode, stats, sessions };
+}
+
+/**
+ * Древо проблем по иерархии кодов
+ */
+async function getErrorHierarchyTree(days = 30) {
+    const dateFilter = `s.created_at >= DATEADD(day, -@p0, DATEADD(hour, 3, GETUTCDATE()))`;
+    
+    // Получаем все проблемные коды с их иерархической структурой
+    const codes = await query(`
+        SELECT 
+            cd.code,
+            cd.status,
+            cd.is_restoration,
+            COUNT(*) as count,
+            -- Извлекаем иерархические компоненты
+            CASE 
+                WHEN cd.code LIKE '%.%-%-%-%' THEN SUBSTRING(cd.code, 1, CHARINDEX('-', cd.code) - 1)
+                ELSE cd.code
+            END as chapter_part,
+            CASE 
+                WHEN cd.code LIKE '%.%-%-%-%' THEN 
+                    SUBSTRING(cd.code, CHARINDEX('.', cd.code) + 1, CHARINDEX('-', cd.code) - CHARINDEX('.', cd.code) - 1)
+                ELSE NULL
+            END as collection_part
+        FROM code_details cd
+        JOIN sessions s ON cd.session_id = s.session_id
+        WHERE ${dateFilter}
+          AND (cd.status IN (N'Нельзя применять', N'Обратите внимание') OR cd.is_restoration = 1)
+        GROUP BY cd.code, cd.status, cd.is_restoration
+        ORDER BY count DESC
+    `, [days]);
+    
+    // Строим дерево
+    const tree = {};
+    for (const code of codes) {
+        const parts = code.code.split(/[.-]/);
+        let current = tree;
+        
+        for (let i = 0; i < Math.min(parts.length, 3); i++) {
+            const part = parts[i];
+            if (!current[part]) {
+                current[part] = {
+                    name: part,
+                    level: i + 1,
+                    codes: [],
+                    total_errors: 0,
+                    children: {}
+                };
+            }
+            if (i === parts.length - 1 || i === 2) {
+                current[part].codes.push(code);
+                current[part].total_errors += code.count;
+            }
+            current = current[part].children;
+        }
+    }
+    
+    return tree;
+}
 async function getUserSessions(userName, days = 30, projectId = null) {
     const params = [userName];
     let dateFilter = `s.created_at >= DATEADD(day, -@p1, DATEADD(hour, 3, GETUTCDATE()))`;

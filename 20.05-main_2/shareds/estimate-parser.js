@@ -168,7 +168,7 @@ function isMR(text) {
 
 const STOP_WORDS = [
     'цена поставщика', 'поставщик', 'приложение', 'письмо', 'разъяснение',
-    'минстрой', 'поправка', 'примечание', 'сноска'
+    'минстрой', 'поправка', 'примечание', 'сноска', 'цена поставщака'
 ];
 
 function containsStopWords(str) {
@@ -569,6 +569,8 @@ function isPureText(str) {
     if (lowerTrimmed.startsWith('прайс лист')) return true;
     if (lowerTrimmed.startsWith('прайс-лист')) return true;
     if (lowerTrimmed.startsWith('прайс-лист ')) return true;
+    if (lowerTrimmed.startsWith('цена поставщака')) return true;
+    if (lowerTrimmed.startsWith('цена поставшика')) return true;
 
     // Если есть код - точно не текст
     const { code } = extractCodeFromStrings(str);
@@ -697,9 +699,9 @@ function parseFullEstimate(fileBuffer) {
                 }
             }
             
-            // Если не нашли, ищем в следующих 7 строках (но не дальше следующей позиции)
+            // Если не нашли, ищем в следующих 2 строках (но не дальше следующей позиции)
             if (!coeffValue) {
-                let maxOffset = 7;
+                let maxOffset = 1;
                 for (let offset = 1; offset <= maxOffset; offset++) {
                     const nextRow = data[i + offset];
                     if (!nextRow) break;

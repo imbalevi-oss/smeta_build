@@ -1,0 +1,151 @@
+<!-- executive-dashboard.html -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Executive Dashboard | Сметная</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="css/executive-dashboard.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="executive-dashboard">
+        <!-- Header -->
+        <div class="dashboard-header">
+            <div class="header-left">
+                <h1><i class="fas fa-chalkboard-user"></i> Executive Dashboard</h1>
+                <p>Аналитика и контроль качества сметной документации</p>
+            </div>
+            <div class="header-right">
+                <div class="date-range">
+                    <select id="periodSelect" class="filter-select">
+                        <option value="7">Последние 7 дней</option>
+                        <option value="30" selected>Последние 30 дней</option>
+                        <option value="90">Последние 90 дней</option>
+                        <option value="365">Последний год</option>
+                    </select>
+                </div>
+                <button onclick="refreshDashboard()" class="btn-refresh">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+                <button onclick="exportDashboard()" class="btn-export">
+                    <i class="fas fa-download"></i> Экспорт
+                </button>
+            </div>
+        </div>
+
+        <!-- KPI Cards -->
+        <div class="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-icon blue"><i class="fas fa-users"></i></div>
+                <div class="kpi-info">
+                    <span class="kpi-label">Активных сметчиков</span>
+                    <span class="kpi-value" id="activeUsers">0</span>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon green"><i class="fas fa-chart-line"></i></div>
+                <div class="kpi-info">
+                    <span class="kpi-label">Средняя точность</span>
+                    <span class="kpi-value" id="avgAccuracy">0%</span>
+                    <span class="kpi-trend" id="accuracyTrend"></span>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon orange"><i class="fas fa-exclamation-triangle"></i></div>
+                <div class="kpi-info">
+                    <span class="kpi-label">Всего ошибок</span>
+                    <span class="kpi-value" id="totalErrors">0</span>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon purple"><i class="fas fa-rupee-sign"></i></div>
+                <div class="kpi-info">
+                    <span class="kpi-label">Сумма смет</span>
+                    <span class="kpi-value" id="totalAmount">0 ₽</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="dashboard-main">
+            <!-- Left Column: Top Users -->
+            <div class="dashboard-column">
+                <div class="widget">
+                    <div class="widget-header">
+                        <h3><i class="fas fa-trophy"></i> Топ сметчиков</h3>
+                        <div class="widget-controls">
+                            <select id="usersSortBy" class="filter-select-sm" onchange="loadTopUsers()">
+                                <option value="rating">⭐ По рейтингу</option>
+                                <option value="accuracy">🎯 По точности</option>
+                                <option value="sessions">📊 По активности</option>
+                                <option value="amount">💰 По сумме</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="widget-body" id="topUsersContainer">
+                        <div class="loading">Загрузка...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Top Errors -->
+            <div class="dashboard-column">
+                <div class="widget">
+                    <div class="widget-header">
+                        <h3><i class="fas fa-bug"></i> Топ проблемных кодов</h3>
+                        <div class="widget-controls">
+                            <select id="errorsFilter" class="filter-select-sm" onchange="loadTopErrors()">
+                                <option value="all">Все ошибки</option>
+                                <option value="Нельзя применять">❌ Запрещённые</option>
+                                <option value="Обратите внимание">⚠️ Требуют внимания</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="widget-body" id="topErrorsContainer">
+                        <div class="loading">Загрузка...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Tree Widget -->
+        <div class="widget full-width">
+            <div class="widget-header">
+                <h3><i class="fas fa-sitemap"></i> Древо проблем по разделам</h3>
+                <button onclick="toggleErrorTree()" class="btn-outline-sm">
+                    <i class="fas fa-expand"></i> Развернуть всё
+                </button>
+            </div>
+            <div class="widget-body" id="errorTreeContainer">
+                <div class="loading">Загрузка...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="userProjectsModal" class="modal-overlay hidden">
+        <div class="modal-container modal-lg">
+            <div class="modal-header">
+                <h2 id="userProjectsTitle">Проекты пользователя</h2>
+                <button class="modal-close" onclick="closeUserProjectsModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="userProjectsBody" class="modal-body"></div>
+        </div>
+    </div>
+
+    <div id="errorDetailsModal" class="modal-overlay hidden">
+        <div class="modal-container modal-xl">
+            <div class="modal-header">
+                <h2 id="errorDetailsTitle">Детали ошибки</h2>
+                <button class="modal-close" onclick="closeErrorDetailsModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="errorDetailsBody" class="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="js/executive-dashboard.js"></script>
+</body>
+</html>
